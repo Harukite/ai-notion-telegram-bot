@@ -16,7 +16,8 @@ required_vars = [
     'TELEGRAM_BOT_TOKEN',
     'NOTION_API_TOKEN',
     'NOTION_DATABASE_ID',
-    'DEEPSEEK_API_KEY'
+    'DEEPSEEK_API_KEY',
+    'TARGET_CHAT_ID'
 ]
 
 missing_vars = [var for var in required_vars if not os.getenv(var)]
@@ -25,6 +26,7 @@ if missing_vars:
 
 # 配置常量
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TARGET_CHAT_ID = os.getenv('TARGET_CHAT_ID')
 NOTION_API_TOKEN = os.getenv('NOTION_API_TOKEN')
 NOTION_DATABASE_ID = os.getenv('NOTION_DATABASE_ID')
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
@@ -49,6 +51,7 @@ CAN_USE_TWITTER_API = USE_TWITTER_API and HAS_TWITTER_CONFIG
 DEEPSEEK_API_TIMEOUT = int(os.getenv('DEEPSEEK_API_TIMEOUT', '60'))  # API请求超时时间，默认60秒
 DEEPSEEK_API_MAX_RETRIES = int(os.getenv('DEEPSEEK_API_MAX_RETRIES', '3'))  # API请求最大重试次数，默认3次
 DEEPSEEK_API_RETRY_DELAY = int(os.getenv('DEEPSEEK_API_RETRY_DELAY', '5'))  # API请求重试初始延迟时间，默认5秒
+
 
 # 记录重要配置信息
 logger = logging.getLogger(__name__)
