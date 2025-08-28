@@ -32,7 +32,8 @@ def check_environment():
         'TELEGRAM_BOT_TOKEN',
         'NOTION_API_TOKEN',
         'NOTION_DATABASE_ID',
-        'DEEPSEEK_API_KEY'
+        'DEEPSEEK_API_KEY',
+        'TARGET_CHAT_ID'
     ]
     
     missing_vars = [var for var in required_vars if not os.getenv(var)]
