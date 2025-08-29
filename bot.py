@@ -1067,28 +1067,25 @@ async def show_recent_entries(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     
     # 创建条目列表
+    import re
+    def escape_markdown(text):
+        # Telegram Markdown V1 需要转义 _ * [ ] ( ) ~ ` > # + - = | { } . !
+        return re.sub(r'([_\*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
+
     message_text = "*最近添加的条目:*\n\n"
-    
     keyboard = []
     for entry in entries:
-        title = entry["title"] or "无标题"
-        status = entry["status"] or "未知状态"
+        title = escape_markdown(entry["title"] or "无标题")
+        status = escape_markdown(entry["status"] or "未知状态")
         entry_id = entry["id"]
-        
-        # 添加条目信息和摘要
-        summary = entry["summary"] or "无摘要"
+        summary = escape_markdown(entry["summary"] or "无摘要")
         message_text += f"• *{title}* ({status})\n"
         message_text += f"  {summary[:100]}...\n\n"
-        
-        # 为每个条目添加一个按钮
         keyboard.append([InlineKeyboardButton(
-            f"{title[:20]}...", 
+            f"{title[:20]}...",
             callback_data=f"show_entry:{entry_id}"
         )])
-    
-    # 添加标签筛选选项
     keyboard.append([InlineKeyboardButton("按标签筛选", callback_data="back_to_tags")])
-    
     await loading_message.edit_text(
         message_text,
         reply_markup=InlineKeyboardMarkup(keyboard),
@@ -1097,27 +1094,46 @@ async def show_recent_entries(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def set_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """设置是否提醒"""
-    await update.message.reply_text(
-        "要设置提醒功能，请先找到相应条目，然后使用'是否提醒设置'按钮。\n\n"
-        "提醒功能可以帮助你标记需要重点关注的内容。",
-        parse_mode='Markdown'
-    )
+    page_id = context.user_data.get("current_page_id")
+    if not page_id:
+        await update.message.reply_text("请先选择一个条目后再设置提醒。", parse_mode='Markdown')
+        return
+    # 获取当前提醒状态
+    entries = notion_manager.get_entries_with_details(limit=1)
+    entry = next((e for e in entries if e["id"] == page_id), None)
+    current_status = entry.get("reminder", False) if entry else False
+    new_status = not current_status
+    result = notion_manager.update_reminder_status(page_id, new_status)
+    if result.get("success"):
+        await update.message.reply_text(f"提醒状态已{'开启' if new_status else '关闭'}。", parse_mode='Markdown')
+    else:
+        await update.message.reply_text(f"提醒状态更新失败: {result.get('error')}", parse_mode='Markdown')
 
 async def check_in(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """标记今日是否打卡"""
-    await update.message.reply_text(
-        "要标记今日打卡状态，请先找到相应条目，然后使用'今日是否打卡设置'按钮。\n\n"
-        "当你标记为'是'时，会自动增加打卡计数。",
-        parse_mode='Markdown'
-    )
+    page_id = context.user_data.get("current_page_id")
+    if not page_id:
+        await update.message.reply_text("请先选择一个条目后再打卡。", parse_mode='Markdown')
+        return
+    # 标记今日打卡
+    result = notion_manager.update_check_in_status(page_id, True)
+    if result.get("success"):
+        notion_manager.increment_check_in_count(page_id)
+        await update.message.reply_text("今日打卡成功！已为该条目增加一次打卡计数。", parse_mode='Markdown')
+    else:
+        await update.message.reply_text(f"打卡失败: {result.get('error')}", parse_mode='Markdown')
 
 async def check_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """查看打卡次数"""
-    await update.message.reply_text(
-        "要查看打卡次数，请先找到相应条目，详情页面会显示当前打卡次数。\n\n"
-        "每次标记今日打卡状态为'是'时，打卡次数会自动增加。",
-        parse_mode='Markdown'
-    )
+    page_id = context.user_data.get("current_page_id")
+    if not page_id:
+        await update.message.reply_text("请先选择一个条目后再查看打卡次数。", parse_mode='Markdown')
+        return
+    # 获取打卡次数
+    entries = notion_manager.get_entries_with_details(limit=1)
+    entry = next((e for e in entries if e["id"] == page_id), None)
+    count = entry.get("check_in_count", 0) if entry else 0
+    await update.message.reply_text(f"当前条目打卡次数：{count}", parse_mode='Markdown')
 
 async def search_entries(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """搜索条目"""

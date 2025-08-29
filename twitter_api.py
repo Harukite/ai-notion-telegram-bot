@@ -6,7 +6,6 @@ Twitter API 模块 - 使用官方API获取推文数据
 import re
 import logging
 import tweepy
-import time
 from config import (
     TWITTER_API_KEY, 
     TWITTER_API_SECRET, 
@@ -51,7 +50,7 @@ class TwitterAPI:
                 consumer_secret=TWITTER_API_SECRET,
                 access_token=TWITTER_ACCESS_TOKEN,
                 access_token_secret=TWITTER_ACCESS_SECRET,
-                wait_on_rate_limit=True
+                # wait_on_rate_limit=True
             )
             
             self.is_initialized = True
@@ -103,54 +102,45 @@ class TwitterAPI:
         if not self.is_initialized:
             logger.warning("Twitter API未初始化，无法获取推文数据")
             return None
-
+            
         try:
+            # 从URL中提取推文ID
             tweet_id = self.extract_tweet_id_from_url(url)
             if not tweet_id:
                 logger.warning(f"无法从URL中提取推文ID: {url}")
                 return None
-
+                
             logger.info(f"尝试使用官方API获取推文: {tweet_id}")
-
-            try:
-                tweet = self.client_v2.get_tweet(
-                    id=tweet_id,
-                    expansions=[
-                        "author_id", 
-                        "referenced_tweets.id", 
-                        "attachments.media_keys"
-                    ],
-                    tweet_fields=[
-                        "created_at", 
-                        "public_metrics", 
-                        "entities", 
-                        "context_annotations", 
-                        "conversation_id"
-                    ],
-                    user_fields=[
-                        "name", 
-                        "username", 
-                        "profile_image_url", 
-                        "verified", 
-                        "description"
-                    ],
-                    media_fields=["preview_image_url", "url"]
-                )
-            except tweepy.TooManyRequests as e:
-                wait_time = int(e.response.headers.get("x-rate-limit-reset", 60)) - int(time.time())
-                wait_time = max(wait_time, 60)
-                logger.warning(f"Twitter API速率限制，等待{wait_time}秒后重试")
-                # 这里可以通过返回特殊内容提醒用户
-                return {
-                    "error": "Twitter API速率限制，请稍后再试。",
-                    "wait_seconds": wait_time
-                }
-            except Exception as e:
-                logger.error(f"API v2异常: {str(e)}")
-                tweet = None
-
+            
+            # 使用API v2获取推文数据
+            tweet = self.client_v2.get_tweet(
+                id=tweet_id,
+                expansions=[
+                    "author_id", 
+                    "referenced_tweets.id", 
+                    "attachments.media_keys"
+                ],
+                tweet_fields=[
+                    "created_at", 
+                    "public_metrics", 
+                    "entities", 
+                    "context_annotations", 
+                    "conversation_id"
+                ],
+                user_fields=[
+                    "name", 
+                    "username", 
+                    "profile_image_url", 
+                    "verified", 
+                    "description"
+                ],
+                media_fields=["preview_image_url", "url"]
+            )
+            
             if not tweet or not tweet.data:
                 logger.warning(f"使用API v2获取推文失败，尝试使用API v1.1: {tweet_id}")
+                
+                # 尝试使用API v1.1作为备选
                 try:
                     tweet_v1 = self.api_v1.get_status(
                         tweet_id, 
@@ -158,20 +148,13 @@ class TwitterAPI:
                         include_entities=True
                     )
                     return self._parse_tweet_v1(tweet_v1, url)
-                except tweepy.TooManyRequests as e:
-                    wait_time = int(e.response.headers.get("x-rate-limit-reset", 60)) - int(time.time())
-                    wait_time = max(wait_time, 60)
-                    logger.warning(f"Twitter API v1.1速率限制，等待{wait_time}秒后重试")
-                    return {
-                        "error": "Twitter API速率限制，请稍后再试。",
-                        "wait_seconds": wait_time
-                    }
                 except Exception as e:
                     logger.error(f"使用API v1.1获取推文失败: {str(e)}")
                     return None
-
+            
+            # 解析API v2返回的数据
             return self._parse_tweet_v2(tweet, url)
-
+            
         except Exception as e:
             logger.error(f"获取推文数据失败: {str(e)}")
             return None

@@ -1,21 +1,21 @@
 import re
 import json
 import requests
-import random
-from bs4 import BeautifulSoup
 import logging
+import asyncio
+import aiohttp
+from bs4 import BeautifulSoup
 from config import (
     DEEPSEEK_API_KEY, 
     HAS_TWITTER_CONFIG, 
     CAN_USE_TWITTER_API,
     DEEPSEEK_API_TIMEOUT, 
     DEEPSEEK_API_MAX_RETRIES,
-    DEEPSEEK_API_RETRY_DELAY
+    DEEPSEEK_API_RETRY_DELAY,
+    RAPIDAPI_KEY
 )
-try:
-    from fake_useragent import UserAgent
-except ImportError:
-    UserAgent = None
+
+# 不再进行网页模拟访问与UA伪装
 
 # 引入Twitter API模块（如果配置了Twitter API）
 try:
@@ -39,6 +39,8 @@ def get_twitter_instructions():
 # logger = get_logger(__name__)
 
 # 移除重复的函数定义，前面已经有一个完整的定义了
+
+MAX_CONTENT_LENGTH = 10000  # 大文本最大长度
 
 class ContentProcessor:
     def __init__(self):
@@ -76,711 +78,105 @@ class ContentProcessor:
             logger.error(f"使用Twitter API获取推文时出错: {str(e)}")
             return None
     
-    def _fetch_webpage_content(self, url):
-        """从URL获取网页内容"""
+    def _fetch_webpage_content(self, url, max_length=MAX_CONTENT_LENGTH):
+        """仅通过官方 Twitter API 或 RapidAPI 获取推文数据；不再抓取网页。"""
         try:
-            # 检查是否是Twitter/X.com链接
             is_twitter = "twitter.com" in url or "x.com" in url
-            
-            # 如果是Twitter/X链接且启用了Twitter API，优先尝试使用API获取内容
-            if is_twitter and CAN_USE_TWITTER_API and HAS_TWEEPY:
-                # 首先尝试使用Twitter API直接获取内容
+            if not is_twitter:
+                # 非 Twitter 链接不再抓取网页
+                return {
+                    "title": "不支持的链接",
+                    "content": "",
+                    "url": url,
+                    "source": url.split("//")[-1].split("/")[0] if "//" in url else url
+                }
+
+            # 1) 官方 Twitter API（如可用）
+            if CAN_USE_TWITTER_API and HAS_TWEEPY:
                 api_result = self._get_twitter_content_via_api(url)
                 if api_result:
-                    logger.info("成功使用Twitter API获取推文，跳过Web抓取")
                     return api_result
-            
-            # 配置随机延时范围
-            min_delay = 1 if not is_twitter else 2
-            max_delay = 3 if not is_twitter else 5
-            
-            # 准备多种User-Agent，模拟各种浏览器
-            chrome_agents = [
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36'
-            ]
-            firefox_agents = [
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/119.0',
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0'
-            ]
-            safari_agents = [
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
-            ]
-            mobile_agents = [
-                'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-                'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36'
-            ]
-            
-            # 根据链接类型选择合适的User-Agent组
-            user_agents = []
-            try:
-                # 尝试使用fake-useragent库获取随机UA
-                import random
-                from fake_useragent import UserAgent
-                ua = UserAgent()
-                user_agents = [ua.chrome, ua.firefox, ua.safari]
-            except:
-                # 如果fake-useragent不可用，使用预定义的UA
-                if is_twitter:
-                    # 对于Twitter，优先使用Chrome和Firefox
-                    user_agents = chrome_agents + firefox_agents
-                else:
-                    # 对于其他站点，使用所有UA
-                    user_agents = chrome_agents + firefox_agents + safari_agents
-                    # 部分站点可能可以用移动UA
-                    if random.random() < 0.2:
-                        user_agents += mobile_agents
-            
-            # 随机选择一个User-Agent
-            user_agent = random.choice(user_agents)
-            
-            # 为X.com设置增强的headers，更接近真实浏览器
-            if is_twitter:
-                # 随机生成viewport尺寸，模拟不同屏幕
-                viewport_width = random.randint(1200, 1920)
-                viewport_height = random.randint(800, 1080)
-                
-                # 构建更真实的headers
-                headers = {
-                    'User-Agent': user_agent,
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'cross-site',  # 模拟从其他站点访问
-                    'Sec-Fetch-User': '?1',
-                    'Cache-Control': 'max-age=0',
-                    'dnt': '1',
-                    'Sec-CH-UA': '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
-                    'Sec-CH-UA-Mobile': '?0',
-                    'Sec-CH-UA-Platform': '"macOS"',
-                    'Referer': random.choice(['https://www.google.com/', 'https://www.bing.com/', 'https://duckduckgo.com/']),
-                    'Pragma': 'no-cache',
-                    'viewport-width': str(viewport_width),
-                    'device-memory': '8',
-                }
-                
-                # 为X.com使用更长的超时时间
-                timeout = random.randint(20, 30)
-                logger.info(f"正在使用增强头信息访问X.com内容: {url}")
-            else:
-                # 对其他网站使用较简单的头信息
-                headers = {
-                    'User-Agent': user_agent,
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1',
-                    'Cache-Control': 'max-age=0',
-                }
-                timeout = random.randint(10, 20)
-            
-            # 创建Session对象以维持cookies
-            session = requests.Session()
-            
-            # 如果是X.com，先访问首页以获取必要的cookies
-            if is_twitter:
+
+            # 2) RapidAPI 兜底（需 RAPIDAPI_KEY 且能提取ID）
+            twitter_id = None
+            username = None
+            if "/status/" in url:
+                parts = url.split('/')
                 try:
-                    logger.info("先访问X.com首页获取cookies")
-                    # 尝试访问多个入口点以获取完整cookie集
-                    entry_points = [
-                        "https://x.com",
-                        "https://twitter.com", 
-                        "https://x.com/home",
-                        "https://x.com/explore"
-                    ]
-                    
-                    for entry in entry_points:
-                        try:
-                            logger.info(f"访问入口点: {entry}")
-                            resp = session.get(entry, headers=headers, timeout=timeout)
-                            if resp.status_code == 200:
-                                logger.info(f"成功访问入口点并获取cookies: {entry}")
-                                # 稍等一会，模拟真实用户行为
-                                import time
-                                time.sleep(random.uniform(min_delay, max_delay))
-                        except Exception as e:
-                            logger.warning(f"访问X.com入口点{entry}时出错: {str(e)}")
-                    
-                    # 模拟鼠标移动和页面滚动的行为（通过headers）
-                    headers['X-Client-Data'] = 'eyJ1YSI6Ik1vemlsbGEvNS4wIChXaW5kb3dzIE5UIDEwLjA7IFdpbjY0OyB4NjQpIEFwcGxlV2ViS2l0LzUzNy4zNiAoS0hUTUwsIGxpa2UgR2Vja28pIENocm9tZS85Ni4wLjQ2NjQuMTEwIFNhZmFyaS81MzcuMzYiLCJicm93c2VyIjoiQ2hyb21lIiwiYnJvd3Nlcl92ZXJzaW9uIjoiOTYuMCIsIm9zIjoiV2luZG93cyIsIm9zX3ZlcnNpb24iOiIxMCIsImRldmljZSI6IiIsInJlZmVycmVyIjoiaHR0cHM6Ly93d3cuZ29vZ2xlLmNvbS8ifQ=='
-                except Exception as e:
-                    logger.warning(f"访问X.com首页时出错，继续尝试直接访问目标URL: {str(e)}")
-            
-            # 添加随机延时，模拟真实用户行为
-            import time
-            time.sleep(random.uniform(min_delay, max_delay))
-            
-            # 发送请求获取网页内容
-            logger.info(f"正在请求URL: {url}")
-            response = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-            response.raise_for_status()
-            
-            # 检测编码
-            if response.encoding == 'ISO-8859-1':
-                # 可能检测错误，尝试用更准确的方式检测
-                encodings = requests.utils.get_encodings_from_content(response.text)
-                if encodings:
-                    response.encoding = encodings[0]
-                else:
-                    response.encoding = response.apparent_encoding
-            
-            # 使用BeautifulSoup解析HTML
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # 检查是否为X.com/Twitter并且返回了访问限制页面
-            is_twitter = "twitter.com" in url or "x.com" in url
-            if is_twitter:
-                # 检查特定的错误信息，扩展错误文本集合
-                error_texts = [
-                    "隐私相关扩展",
-                    "privacy extensions",
-                    "Something went wrong",
-                    "出了点问题",
-                    "请尝试重新加载",
-                    "try reloading",
-                    "rate limit",
-                    "too many requests",
-                    "访问受限",
-                    "access denied",
-                    "blocked",
-                    "blocked temporarily",
-                    "try again later",
-                    "稍后再试",
-                    "login",
-                    "登录以查看",
-                    "sign in",
-                    "too many connections"
-                ]
-                
-                page_text = soup.get_text().lower()
-                if any(text.lower() in page_text for text in error_texts):
-                    logger.warning("检测到X.com访问限制页面，尝试备用方法...")
-                    
-                    # 尝试提取Twitter ID
-                    twitter_id = None
-                    username = None
-                    
-                    # 从URL中提取Twitter ID
-                    if "/status/" in url:
-                        # 提取用户名和推文ID
-                        parts = url.split('/')
-                        status_index = -1
-                        for i, part in enumerate(parts):
-                            if part == "status":
-                                status_index = i
-                                break
-                        
-                        if status_index > 0 and status_index + 1 < len(parts):
-                            username = parts[status_index - 1]
-                            twitter_id = parts[status_index + 1].split("?")[0]
-                    # 尝试从URL中提取用户名和推文ID的其他方式
-                    elif "x.com" in url or "twitter.com" in url:
-                        parts = url.split('/')
-                        if len(parts) >= 5:  # 足够长的URL可能包含用户名和ID
-                            potential_id = parts[-1].split("?")[0]
-                            if potential_id.isalnum():
-                                twitter_id = potential_id
-                                # 尝试提取用户名
-                                if len(parts) >= 4:
-                                    username = parts[-3]  # 假设URL格式为 twitter.com/username/status/id
-                    
-                    # 1. 首先尝试使用Twitter API（如果启用并配置了）
-                    api_success = False
-                    tweet_data = None
-                    
-                    if CAN_USE_TWITTER_API and HAS_TWEEPY and twitter_id and twitter_id.isalnum():
-                        try:
-                            logger.info(f"尝试使用Twitter API获取推文 ID: {twitter_id}")
-                            # 使用已经初始化好的twitter_api实例
-                            api = twitter_api
-                            
-                            # 构建完整的Twitter URL用于API调用
-                            full_twitter_url = f"https://twitter.com/{username}/status/{twitter_id}" if username else url
-                            logger.info(f"使用URL获取推文: {full_twitter_url}")
-                            tweet_data = api.get_tweet_data(full_twitter_url)
-                            
-                            if tweet_data and isinstance(tweet_data, dict) and 'content' in tweet_data:
-                                content_preview = tweet_data.get('content', '')
-                                logger.info(f"成功从Twitter API获取推文内容: {content_preview[:50] if content_preview else '(无内容)'}")
-                                
-                                # 提取推文文本
-                                tweet_text = tweet_data.get('content', '')
-                                
-                                # 提取用户信息
-                                tweet_meta = tweet_data.get('tweet_meta', {})
-                                user_name = tweet_meta.get('username', '')
-                                user_display_name = tweet_meta.get('author', '')
-                                
-                                # 提取日期
-                                created_at = tweet_meta.get('date', '')
-                                
-                                # 提取标签和提及
-                                hashtags = tweet_meta.get('tags', [])
-                                mentions = tweet_meta.get('mentions', [])
-                                
-                                # 创建一个简单的HTML结构，模拟从web获取的内容
-                                html_content = f"""
-                                <html>
-                                <head><title>{user_display_name} (@{user_name}) / X</title></head>
-                                <body>
-                                    <div class="main-tweet">
-                                        <div class="tweet-header">
-                                            <span class="tweet-user">{user_display_name} (@{user_name})</span>
-                                            <span class="tweet-date">{created_at}</span>
-                                        </div>
-                                        <div class="tweet-content">{tweet_text}</div>
-                                        <div class="tweet-entities">
-                                            {"<div class='tweet-hashtags'>#" + " #".join(hashtags) + "</div>" if hashtags else ""}
-                                            {"<div class='tweet-mentions'>@" + " @".join(mentions) + "</div>" if mentions else ""}
-                                        </div>
-                                    </div>
-                                </body>
-                                </html>
-                                """
-                                
-                                # 解析为BeautifulSoup对象
-                                soup = BeautifulSoup(html_content, 'html.parser')
-                                api_success = True
-                                logger.info("成功使用Twitter API获取推文并创建内容结构")
-                                
-                                # 直接使用API返回的提取标签
-                                hashtags = tweet_data.get('extracted_tags', [])
-                        except Exception as e:
-                            logger.error(f"使用Twitter API获取推文失败: {str(e)}")
-                    else:
-                        if not CAN_USE_TWITTER_API:
-                            if not HAS_TWITTER_CONFIG:
-                                logger.info("未配置Twitter API，跳过API获取步骤")
-                            else:
-                                logger.info("Twitter API已禁用，如需启用请设置USE_TWITTER_API=true")
-                        elif not HAS_TWEEPY:
-                            logger.info("未安装tweepy库，跳过API获取步骤")
-                        elif not twitter_id:
-                            logger.info("未能从URL中提取有效的推文ID，跳过API获取步骤")
-                    
-                    # 2. 如果Twitter API失败，尝试Nitter服务
-                    if not api_success and twitter_id and twitter_id.isalnum():
-                        try:
-                            # 根据 status.d420.de 更新的健康的nitter实例列表
-                            nitter_urls = [
-                                f"https://xcancel.com/i/status/{twitter_id}",         # 99% 健康度
-                                f"https://nuku.trabun.org/i/status/{twitter_id}",      # 98% 健康度
-                                f"https://nitter.tiekoetter.com/i/status/{twitter_id}", # 24% 健康度
-                                f"https://lightbrd.com/i/status/{twitter_id}",         # 94% 健康度
-                                f"https://nitter.privacyredirect.com/i/status/{twitter_id}", # 91% 健康度
-                                f"https://nitter.net/i/status/{twitter_id}",           # 93% 健康度
-                                f"https://nitter.poast.org/i/status/{twitter_id}",     # 85% 健康度
-                                f"https://nitter.space/i/status/{twitter_id}",         # 95% 健康度
-                                f"https://nitter.kuuro.net/i/status/{twitter_id}",     # 83% 健康度
-                            ]
-                            
-                            # 随机打乱顺序，避免总是访问同一个实例
-                            import random
-                            random.shuffle(nitter_urls)
-                            
-                            success = False
-                            for nitter_url in nitter_urls:
-                                try:
-                                    logger.info(f"尝试使用Nitter替代服务: {nitter_url}")
-                                    nitter_headers = {
-                                        'User-Agent': random.choice(user_agents),
-                                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                                        'Accept-Language': 'en-US,en;q=0.5',
-                                        'Connection': 'keep-alive',
-                                        'Upgrade-Insecure-Requests': '1',
-                                    }
-                                    nitter_resp = requests.get(nitter_url, headers=nitter_headers, timeout=15)
-                                    if nitter_resp.status_code == 200:
-                                        # 检查内容是否有效
-                                        nitter_soup = BeautifulSoup(nitter_resp.content, 'html.parser')
-                                        main_content = nitter_soup.select(".main-tweet") or nitter_soup.select("article")
-                                        
-                                        if main_content and len(nitter_soup.get_text()) > 200:
-                                            soup = nitter_soup
-                                            logger.info("成功从Nitter获取内容")
-                                            success = True
-                                            break
-                                        else:
-                                            logger.warning(f"Nitter返回页面但内容不足: {nitter_url}")
-                                    else:
-                                        logger.warning(f"Nitter服务返回非200状态码: {nitter_resp.status_code}")
-                                except Exception as e:
-                                    logger.warning(f"Nitter替代服务失败: {str(e)}")
-                                    continue
-                                
-                                # 添加随机延时，避免快速连续请求
-                                time.sleep(random.uniform(1, 3))
-                            
-                            # 如果所有Nitter实例都失败，记录错误
-                            if not success and not api_success:  # 如果API也失败了
-                                logger.error("所有备用方法均失败")
-                        except Exception as e:
-                            logger.error(f"尝试Nitter替代服务时出错: {str(e)}")
-                    # 如果API已经成功获取，跳过Nitter
-                    elif api_success:
-                        logger.info("Twitter API已成功获取内容，跳过Nitter服务")
-            
-            # 检查是否是Twitter/X.com链接
-            is_twitter = "twitter.com" in url or "x.com" in url or "nitter" in url
-            
-            # 移除不需要的元素
-            for element in soup(["script", "style", "nav", "footer", "iframe", "noscript", "aside"] + ([] if is_twitter else ["header"])):
-                element.extract()
-            
-            # 提取标题 (尝试多种方法)
-            title = "未知标题"
-            if soup.title and soup.title.string:
-                title = soup.title.string.strip()
-            elif soup.find("meta", property="og:title"):
-                meta_tag = soup.find("meta", property="og:title")
-                if meta_tag and hasattr(meta_tag, "get"):
-                    title = meta_tag.get("content", "未知标题") # pyright: ignore[reportAttributeAccessIssue]
-                else:
-                    title = "未知标题"
-            elif soup.find("h1"):
-                title = soup.find("h1").get_text().strip() # pyright: ignore[reportOptionalMemberAccess]
-            
-            # 清理标题
-            if isinstance(title, str):
-                # 对于Nitter服务，清理标题中的"/ Twitter"或"/ X"
-                title = re.sub(r'\s*[/|]\s*(Twitter|X|推特).*$', '', title)
-            
-            # 获取主要内容
-            content = ""
-            hashtags = []  # 用于存储X.com/Twitter的#标签
-            mentions = []  # 用于存储@提及
-            dollar_tags = []  # 用于存储$开头的标签
-            
-            # 检查是否是Twitter/X.com链接
-            is_twitter = "twitter.com" in url or "x.com" in url or "nitter" in url
-            
-            # 如果是Twitter/X.com链接，尝试提取标签和高亮内容
-            if is_twitter:
-                # 提取所有带#的标签和@提及
-                all_text = soup.get_text()
-                hashtag_matches = re.findall(r'#(\w+)', all_text)
-                mention_matches = re.findall(r'@(\w+)', all_text)
-                
-                if hashtag_matches:
-                    hashtags.extend(hashtag_matches)
-                    logger.info(f"从Twitter/X提取到标签: {hashtags}")
-                
-                if mention_matches:
-                    mentions.extend(mention_matches)
-                    logger.info(f"从Twitter/X提取到提及: {mentions}")
-                
-                # 检查是否是从nitter获取的内容
-                is_nitter = "nitter" in url
-                
-                # 针对不同来源使用不同的选择器
-                if is_nitter:
-                    tweet_content_selectors = [
-                        ".tweet-content", 
-                        ".main-tweet .tweet-content", 
-                        ".timeline-item .tweet-content",
-                        "article .tweet-content",
-                        ".main-tweet",
-                        "article"
-                    ]
-                    # 从nitter特别提取标签
-                    hashtag_elements = soup.select(".tweet-content .hashtag, .main-tweet .hashtag")
-                    for elem in hashtag_elements:
-                        tag_text = elem.get_text().strip()
-                        if tag_text.startswith('#'):
-                            tag = tag_text[1:]  # 移除#符号
-                            if tag and tag not in hashtags:
-                                hashtags.append(tag)
-                                
-                    # 从nitter特别提取提及
-                    mention_elements = soup.select(".tweet-content .tweet-link, .main-tweet .tweet-link")
-                    for elem in mention_elements:
-                        mention_text = elem.get_text().strip()
-                        if mention_text.startswith('@'):
-                            mention = mention_text[1:]  # 移除@符号
-                            if mention and mention not in mentions:
-                                mentions.append(mention)
-                else:
-                    # X.com原始网站的选择器
-                    tweet_content_selectors = [
-                        "div[data-testid='tweetText']", 
-                        "article[data-testid='tweet']", 
-                        "div[lang]",
-                        "p.tweet-text",
-                        "div.tweet-content",
-                        # 新版X.com的选择器
-                        "article div[lang]",
-                        "div[role='article']",
-                        "[data-testid='tweet'] div[dir='auto']"
-                    ]
-                    
-                    # 特别提取X.com的标签和提及
-                    hashtag_elements = soup.select("a[href*='hashtag']")
-                    for elem in hashtag_elements:
-                        tag_text = elem.get_text().strip()
-                        if tag_text.startswith('#'):
-                            tag = tag_text[1:]
-                            if tag and tag not in hashtags:
-                                hashtags.append(tag)
-                    
-                    mention_elements = soup.select("a[href*='/status/'] span, a[href^='/']")
-                    for elem in mention_elements:
-                        mention_text = elem.get_text().strip()
-                        if mention_text.startswith('@'):
-                            mention = mention_text[1:]
-                            if mention and mention not in mentions and len(mention) > 1:
-                                mentions.append(mention)
-                
-                # 查找推文正文内容
-                tweet_content = None
-                tweet_text_full = ""
-                
-                # 首先尝试各种选择器找到主要内容
-                for selector in tweet_content_selectors:
-                    tweet_elements = soup.select(selector)
-                    if tweet_elements:
-                        # 使用最长的内容块作为推文内容
-                        tweet_content = max(tweet_elements, key=lambda x: len(x.get_text()))
-                        tweet_text_full = tweet_content.get_text().strip()
-                        logger.info(f"找到推文内容，长度: {len(tweet_text_full)}")
-                        break
-                
-            # 如果找到推文内容，提取其中的关键信息
-            if tweet_content:
-                # 尝试查找引用或高亮的文本（扩展选择器范围）
-                quote_elements = tweet_content.select(
-                    "blockquote, em, strong, b, span[style*='bold'], span[style*='font-weight'], " + 
-                    "span.r-b88u0q, div.r-1s2bzr4, span[style*='italic'], " + 
-                    "span.css-901oao, div.css-1dbjc4n, span[aria-hidden='true']"
-                )
-                
-                # 查找引用的推文
-                quoted_tweet = soup.select("div[role='link'][tabindex='0'], div.quoted-tweet, " + 
-                                          "div.css-1dbjc4n[role='link'], div.main-tweet-quoted-tweet")
-                
-                highlights = []
-                
-                # 处理高亮元素
-                for elem in quote_elements:
-                    text = elem.get_text().strip()
-                    if text and len(text) > 8:  # 降低长度限制以捕获更多高亮内容
-                        # 检查是否已经有类似的高亮内容
-                        is_duplicate = False
-                        for existing in highlights:
-                            # 如果现有高亮是当前文本的子串，或反之，则认为是重复的
-                            if text in existing or existing in text:
-                                is_duplicate = True
-                                # 如果当前文本更长，替换现有的
-                                if len(text) > len(existing):
-                                    highlights.remove(existing)
-                                    highlights.append(text)
-                                break
-                        
-                        if not is_duplicate:
-                            highlights.append(text)                    # 处理引用的推文
-                    for elem in quoted_tweet:
-                        quoted_text = elem.get_text().strip()
-                        if quoted_text and len(quoted_text) > 20:  # 引用推文通常较长
-                            # 添加特殊标记表明这是引用的推文
-                            highlights.append(f"引用推文: {quoted_text[:200]}")
-                    
-                    # 记录高亮内容用于关键点
-                    if highlights:
-                        logger.info(f"找到高亮内容: {len(highlights)}个")
-                        # 将这些高亮内容添加到content而不是直接修改soup
-                        for highlight in highlights:
-                            # 将高亮内容追加到content，使用明确的标记便于AI识别
-                            content += f"\n\n<<高亮内容>> {highlight} <<高亮结束>>"
-            
-            # 尝试获取主要内容区域
-            main_content = None
-            selectors = ["main", "article"]
-            
-            # 对于Twitter/X.com添加更具体的选择器
-            if is_twitter:
-                selectors = ["div[data-testid='tweetText']", "article[data-testid='tweet']"] + selectors
-                
-            # 添加通用选择器
-            selectors += ["div[class*='content']", "div[class*='article']", "div[id*='content']", "div[id*='article']"]
-            
-            for tag in selectors:
-                elements = soup.select(tag)
-                if elements:
-                    # 选择最长的内容块
-                    main_content = max(elements, key=lambda x: len(x.get_text()))
-                    break
-            
-            # 如果是Twitter/X内容，使用特殊的内容提取方法
-            if is_twitter:
-                # 如果已经通过推文内容提取器找到了主要内容，直接使用
-                if tweet_text_full and len(tweet_text_full) > 50:
-                    # 如果已有content（从高亮内容中提取的），则加入主要推文内容
-                    if content:
-                        content = f"推文内容: {tweet_text_full}\n\n" + content
-                    else:
-                        content = tweet_text_full
-                else:
-                    # 尝试使用更特定的Twitter内容提取方法
-                    twitter_content = []
-                    
-                    # 针对不同Twitter页面结构的选择器
-                    content_selectors = [
-                        "div[data-testid='tweetText']", 
-                        "article[data-testid='tweet']", 
-                        "div.tweet-content",
-                        ".main-tweet",
-                        "div.timeline-item .tweet-content"
-                    ]
-                    
-                    for selector in content_selectors:
-                        elements = soup.select(selector)
-                        if elements:
-                            for elem in elements:
-                                text = elem.get_text().strip()
-                                if text and len(text) > 30:
-                                    twitter_content.append(text)
-                    
-                    if twitter_content:
-                        content = "推文内容: " + "\n\n".join(twitter_content) + "\n\n" + content
-            
-            # 如果找到主要内容区域（或者不是Twitter内容），就使用它
-            if main_content and (not is_twitter or not content):
-                # 删除可能的干扰元素
-                for element in main_content(["header", "footer", "nav", "aside", "div[class*='comment']"]):
-                    element.extract()
-                    
-                # 提取段落
-                paragraphs = []
-                for p in main_content.find_all(["p", "h2", "h3", "h4", "li", "blockquote"]):
-                    text = p.get_text().strip()
-                    if len(text) > 15:  # 稍微降低长度阈值，以捕获更多内容
-                        paragraphs.append(text)
-                
-                # 如果是Twitter但已有内容，则添加到现有内容；否则直接赋值
-                if is_twitter and content:
-                    content += "\n\n" + "\n\n".join(paragraphs)
-                else:
-                    content = "\n\n".join(paragraphs)
-            
-            # 如果没有找到或提取到的内容太少，则回退到整个页面
-            if not content or len(content) < 150:  # 降低阈值以避免放弃太多内容
-                # 提取所有段落
-                paragraphs = []
-                for p in soup.find_all(["p", "h1", "h2", "h3", "h4", "li", "blockquote"]):
-                    text = p.get_text().strip()
-                    if len(text) > 15:  # 降低长度阈值
-                        paragraphs.append(text)
-                
-                # 如果已有内容，则添加；否则直接赋值
-                if content and paragraphs:
-                    content += "\n\n" + "\n\n".join(paragraphs)
-                elif paragraphs:
-                    content = "\n\n".join(paragraphs)
-            
-            # 如果仍然没有足够内容，使用整个页面文本
-            if not content or len(content) < 150:
-                content = soup.get_text(separator='\n', strip=True)
-            
-            # 清理多余空白并增强内容结构
-            content = '\n\n'.join(line.strip() for line in content.split('\n') if line.strip())
-            
-            # 提取内容中以$和#开头的文本作为标签
-            extracted_special_tags = []
-            
-            # 提取#标签（不仅限于Twitter/X内容）
-            general_hashtag_matches = re.findall(r'#(\w+)', content)
-            if general_hashtag_matches:
-                for tag in general_hashtag_matches:
-                    if tag and len(tag) > 1 and tag.lower() not in [t.lower() for t in extracted_special_tags]:
-                        extracted_special_tags.append(tag)
-                        
-            # 提取$标签
-            dollar_tag_matches = re.findall(r'\$(\w+)', content)
-            if dollar_tag_matches:
-                for tag in dollar_tag_matches:
-                    if tag and len(tag) > 1 and tag.lower() not in [t.lower() for t in extracted_special_tags]:
-                        extracted_special_tags.append(tag)
-            
-            logger.info(f"从内容中提取到的特殊标签(#和$): {extracted_special_tags}")
-            
-            # 提取网站来源
-            source = url.split("//")[-1].split("/")[0]
-            
-            # 处理Twitter/X特定的元数据
-            extracted_tags = []
-            extracted_mentions = []
-            tweet_meta = {}
-            
-            if is_twitter:
-                # 处理提取的标签
-                if hashtags:
-                    # 去重复、去空值、最多取8个标签
-                    extracted_tags = list(set([tag.lower() for tag in hashtags if tag and len(tag) > 1]))[:8]
-                    logger.info(f"从Twitter/X成功提取到标签: {extracted_tags}")
-                
-                # 处理提取的@提及
-                if mentions:
-                    # 去重复、去空值
-                    extracted_mentions = list(set([mention for mention in mentions if mention and len(mention) > 1]))[:5]
-                    logger.info(f"从Twitter/X成功提取到提及: {extracted_mentions}")
-                
-                # 创建tweet元数据
-                tweet_meta = {
-                    "platform": "Twitter" if "twitter.com" in url else "X",
-                    "tags": extracted_tags,
-                    "mentions": extracted_mentions
+                    status_index = parts.index("status")
+                except ValueError:
+                    status_index = -1
+                if status_index > 0 and status_index + 1 < len(parts):
+                    username = parts[status_index - 1]
+                    twitter_id = parts[status_index + 1].split("?")[0]
+
+            if RAPIDAPI_KEY and twitter_id and twitter_id.isalnum():
+                rapidapi_url = "https://twitter-api45.p.rapidapi.com/tweet.php"
+                rapidapi_headers = {
+                    "x-rapidapi-key": RAPIDAPI_KEY,
+                    "x-rapidapi-host": "twitter-api45.p.rapidapi.com"
                 }
-                
-                # 如果是nitter服务，记录实际来源
-                if "nitter" in url:
-                    tweet_meta["via"] = "nitter"
-                
-                # 尝试提取推文日期（如果可用）
-                try:
-                    date_elements = soup.select("span.tweet-date, a.tweet-date, span.css-1dbjc4n time, time")
-                    if date_elements:
-                        for date_elem in date_elements:
-                            if date_elem.has_attr('datetime'):
-                                tweet_meta["date"] = date_elem['datetime']
-                                break
-                            elif date_elem.has_attr('title'):
-                                tweet_meta["date"] = date_elem['title']
-                                break
-                            else:
-                                date_text = date_elem.get_text().strip()
-                                if date_text and (":" in date_text or "/" in date_text or "-" in date_text):
-                                    tweet_meta["date"] = date_text
-                                    break
-                except Exception as e:
-                    logger.warning(f"提取推文日期时出错: {str(e)}")
-                
-                # 设置来源为Twitter/X
-                source = "Twitter" if "twitter.com" in url else "X"
-            
-            logger.info(f"成功提取网页内容，标题: {title}, 内容长度: {len(content)}")
-            
-            # 构建返回数据
-            return_data = {
-                "title": title,
-                "content": content[:20000],  # 增加上限以包含更多推文内容
+                rapidapi_querystring = {"id": twitter_id}
+                resp = requests.get(rapidapi_url, headers=rapidapi_headers, params=rapidapi_querystring, timeout=20)
+                if resp.status_code == 200:
+                    try:
+                        data = resp.json()
+                        tweet_text = data.get('display_text', '') or data.get('text', '') or ""
+                        user_info = data.get('author', {}) if isinstance(data.get('author', {}), dict) else {}
+                        if not user_info and isinstance(data.get('user', {}), dict):
+                            user_info = data.get('user', {})
+                        user_name = user_info.get('screen_name', '') or ""
+                        user_display_name = user_info.get('name', '') or ""
+
+                        hashtags = []
+                        entities = data.get('entities', {}) if isinstance(data.get('entities', {}), dict) else {}
+                        if 'hashtags' in entities and entities['hashtags']:
+                            for tag in entities['hashtags']:
+                                if isinstance(tag, dict) and 'text' in tag:
+                                    hashtags.append(tag['text'])
+
+                        # 计算完整推文链接（用于缺失或替代）
+                        full_url = url
+                        try:
+                            if user_name and twitter_id:
+                                full_url = f"https://twitter.com/{user_name}/status/{twitter_id}"
+                            elif twitter_id:
+                                full_url = f"https://twitter.com/i/web/status/{twitter_id}"
+                        except Exception:
+                            pass
+
+                        title = (
+                            f"{user_display_name} (@{user_name}): {tweet_text[:30] + ('...' if len(tweet_text) > 30 else '')}"
+                            if user_display_name and user_name else (tweet_text[:30] + ('...' if len(tweet_text) > 30 else '')) or "Twitter推文"
+                        )
+
+                        return {
+                            "title": title,
+                            "content": tweet_text,
+                            "url": full_url or url,
+                            "source": f"Twitter (@{user_name})" if user_name else "Twitter",
+                            "extracted_tags": hashtags or [],
+                            "tweet_meta": {
+                                "platform": "Twitter" if "twitter.com" in url else "X",
+                                "author": user_display_name or "",
+                                "username": user_name or "",
+                                "date": data.get('created_at', '') or "",
+                                "tags": hashtags or [],
+                                "via": "RapidAPI"
+                            }
+                        }
+                    except Exception as e:
+                        logger.error(f"解析RapidAPI返回数据时出错: {str(e)}")
+
+            # Twitter 获取失败
+            return {
+                "title": "获取失败",
+                "content": "",
                 "url": url,
-                "source": source,
-                "extracted_tags": extracted_tags,
-                "special_tags": extracted_special_tags  # 添加提取的$和#标签
+                "source": "Twitter" if "twitter.com" in url else "X"
             }
-            
-            # 添加Twitter元数据
-            if is_twitter and tweet_meta:
-                return_data["tweet_meta"] = tweet_meta
-            
-            return return_data
         except Exception as e:
-            logger.error(f"获取网页内容失败: {str(e)}")
+            logger.error(f"获取内容失败: {str(e)}")
             return {
                 "title": "获取失败",
                 "content": f"无法获取内容: {str(e)}",
@@ -788,11 +184,91 @@ class ContentProcessor:
                 "source": url.split("//")[-1].split("/")[0] if "//" in url else url
             }
     
+    def fetch_webpage_content(self, url, max_length=MAX_CONTENT_LENGTH):
+        """同步方式抓取网页内容（非x.com）"""
+        try:
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.content, 'html.parser')
+            title = soup.title.string.strip() if soup.title and soup.title.string else '未知标题'
+            content = soup.get_text(separator='\n', strip=True)
+            # 限制最大长度
+            if len(content) > max_length:
+                content = content[:max_length]
+            return {
+                'title': title,
+                'content': content,
+                'url': url,
+                'source': url.split('//')[-1].split('/')[0]
+            }
+        except Exception as e:
+            return {
+                'title': '获取失败',
+                'content': f'无法获取内容: {str(e)}',
+                'url': url,
+                'source': url.split('//')[-1].split('/')[0]
+            }
+
+    async def fetch_webpage_content_async(self, url, session, max_length=MAX_CONTENT_LENGTH):
+        """异步方式抓取网页内容（非x.com）"""
+        try:
+            async with session.get(url, timeout=15) as resp:
+                text = await resp.text()
+                soup = BeautifulSoup(text, 'html.parser')
+                title = soup.title.string.strip() if soup.title and soup.title.string else '未知标题'
+                content = soup.get_text(separator='\n', strip=True)
+                if len(content) > max_length:
+                    content = content[:max_length]
+                return {
+                    'title': title,
+                    'content': content,
+                    'url': url,
+                    'source': url.split('//')[-1].split('/')[0]
+                }
+        except Exception as e:
+            return {
+                'title': '获取失败',
+                'content': f'无法获取内容: {str(e)}',
+                'url': url,
+                'source': url.split('//')[-1].split('/')[0]
+            }
+
+    async def batch_fetch_webpages(self, urls, max_length=MAX_CONTENT_LENGTH):
+        """批量异步抓取网页内容（非x.com）"""
+        async with aiohttp.ClientSession() as session:
+            tasks = [self.fetch_webpage_content_async(url, session, max_length) for url in urls]
+            return await asyncio.gather(*tasks)
+
     def process_link(self, url):
-        """处理链接并返回结构化内容"""
-        # 获取网页内容
-        webpage_data = self._fetch_webpage_content(url)
-        
+        """处理链接并返回结构化内容（支持x.com和普通网页）"""
+        is_twitter = "twitter.com" in url or "x.com" in url or "nitter" in url
+        if is_twitter and CAN_USE_TWITTER_API and HAS_TWEEPY:
+            webpage_data = self._get_twitter_content_via_api(url)
+            if not webpage_data:
+                logger.error(f"无法通过Twitter API获取内容: {url}")
+                return {
+                    "title": "获取失败",
+                    "summary": "无法通过API获取内容。请检查API配置或推文链接是否有效。",
+                    "key_points": ["无法获取内容", "请检查URL是否正确", "API配置是否有效"],
+                    "tags": ["访问失败", "内容缺失"],
+                    "related_links": [],
+                    "source": "Twitter",
+                    "original_url": url
+                }
+        else:
+            # 普通网页抓取
+            webpage_data = self.fetch_webpage_content(url)
+            if not webpage_data.get("content") or len(webpage_data["content"]) < 10:
+                logger.warning(f"网页内容不足或为空: {url}")
+                return {
+                    "title": webpage_data.get("title", "无法获取标题"),
+                    "summary": "未能获取足够内容进行分析。请检查链接。",
+                    "key_points": ["无法获取内容", "请检查URL是否正确"],
+                    "tags": ["访问失败", "内容缺失"],
+                    "related_links": [],
+                    "source": webpage_data.get("source", url.split("//")[-1].split("/")[0] if "//" in url else url),
+                    "original_url": url
+                }
         # 检查是否成功获取内容
         if not webpage_data.get("content") or len(webpage_data["content"]) < 100:
             logger.warning(f"获取网页内容不足或为空: {url}")
@@ -809,6 +285,32 @@ class ContentProcessor:
         # 使用DeepSeek API分析内容
         # 检查是否是X.com (Twitter)链接
         is_twitter = "twitter.com" in url or "x.com" in url or "nitter" in url
+        
+        # 确保标题字段存在
+        if not webpage_data.get("title"):
+            # 如果缺失标题，先尝试从tweet_meta中获取
+            if is_twitter and webpage_data.get("tweet_meta"):
+                tweet_meta = webpage_data["tweet_meta"]
+                username = tweet_meta.get("username", "")
+                author = tweet_meta.get("author", "")
+                if author and username:
+                    webpage_data["title"] = f"{author} (@{username})的推文"
+                elif author:
+                    webpage_data["title"] = f"{author}的推文"
+                elif username:
+                    webpage_data["title"] = f"@{username}的推文"
+                else:
+                    webpage_data["title"] = "Twitter推文"
+            else:
+                # 非Twitter内容或无法从tweet_meta获取，使用display_text生成标题
+                display_text = webpage_data.get("content", "")[:50].strip()
+                if display_text:
+                    webpage_data["title"] = f"{display_text}..."
+                else:
+                    webpage_data["title"] = "未知标题"
+                    
+            # 记录我们生成的标题
+            logger.info(f"为缺失标题生成替代标题: {webpage_data['title']}")
         
         # 处理网页内容，对于Twitter内容特别处理
         content_to_analyze = webpage_data['content'][:10000]
@@ -948,8 +450,20 @@ class ContentProcessor:
                 
                 # 确保所有必要字段都存在
                 if not parsed_data.get("title"):
-                    parsed_data["title"] = webpage_data["title"]
-                
+                    # 检查原始标题是否有"未知"或"推文"等通用标记，如果是则保留DeepSeek生成的标题
+                    original_title = webpage_data.get("title", "")
+                    generic_title_indicators = ["未知标题", "推文", "Twitter推文"]
+                    
+                    if any(indicator in original_title for indicator in generic_title_indicators):
+                        if is_twitter:
+                            # 尝试用DeepSeek的摘要生成一个更好的标题
+                            summary = parsed_data.get("summary", "")
+                            if summary:
+                                parsed_data["title"] = summary[:50] + "..." if len(summary) > 50 else summary
+                            else:
+                                parsed_data["title"] = original_title
+                        else:
+                            parsed_data["title"] = original_title
                 if not parsed_data.get("summary"):
                     parsed_data["summary"] = "未能生成摘要，请查看原文。"
                 
@@ -1129,281 +643,7 @@ class ContentProcessor:
         
         # 分割成行进行处理
         lines = text.split('\n')
-        
         # 首先尝试查找常见的字段标记
         title_patterns = [
-            r'"title"\s*:\s*"([^"]+)"',
-            r'"主题"\s*:\s*"([^"]+)"',
-            r'主题[:：]\s*(.+)',
-            r'标题[:：]\s*(.+)',
-            r'title[:：]\s*(.+)'
+            r'"title"\s*:\s*"([^"]+)",?'
         ]
-        
-        summary_patterns = [
-            r'"summary"\s*:\s*"([^"]+)"',
-            r'"摘要"\s*:\s*"([^"]+)"',
-            r'摘要[:：]\s*(.+)',
-            r'summary[:：]\s*(.+)'
-        ]
-        
-        source_patterns = [
-            r'"source"\s*:\s*"([^"]+)"',
-            r'"来源"\s*:\s*"([^"]+)"',
-            r'来源[:：]\s*(.+)',
-            r'source[:：]\s*(.+)'
-        ]
-        
-        # 提取标题
-        for pattern in title_patterns:
-            for line in lines:
-                match = re.search(pattern, line, re.IGNORECASE)
-                if match:
-                    data["title"] = match.group(1).strip()
-                    break
-            if data["title"] != "未知标题":
-                break
-        
-        # 提取摘要
-        combined_text = " ".join(lines)
-        for pattern in summary_patterns:
-            match = re.search(pattern, combined_text, re.IGNORECASE)
-            if match:
-                data["summary"] = match.group(1).strip()
-                break
-        
-        # 如果没有找到摘要，尝试查找摘要部分
-        if not data["summary"]:
-            summary_section_found = False
-            summary_lines = []
-            
-            for i, line in enumerate(lines):
-                if re.search(r'摘要[:：]|summary[:：]', line, re.IGNORECASE):
-                    summary_section_found = True
-                    continue
-                
-                if summary_section_found:
-                    if re.search(r'关键点|key points|tags|标签|相关链接|related links', line, re.IGNORECASE):
-                        summary_section_found = False
-                    else:
-                        clean_line = line.strip()
-                        if clean_line and not clean_line.startswith('"') and not clean_line.startswith('{'):
-                            summary_lines.append(clean_line)
-            
-            if summary_lines:
-                data["summary"] = " ".join(summary_lines)
-        
-        # 提取来源
-        for pattern in source_patterns:
-            for line in lines:
-                match = re.search(pattern, line, re.IGNORECASE)
-                if match:
-                    data["source"] = match.group(1).strip()
-                    break
-            if data["source"] != url.split("//")[-1].split("/")[0]:
-                break
-        
-        # 提取关键点
-        key_points_section = False
-        for line in lines:
-            line = line.strip()
-            
-            # 检查是否是关键点部分的开始
-            if re.search(r'关键点[:：]|key[_ ]points[:：]', line, re.IGNORECASE):
-                key_points_section = True
-                continue
-            
-            # 检查是否到达了关键点部分的结束
-            if key_points_section and re.search(r'tags|标签|相关链接|related links|来源|source', line, re.IGNORECASE):
-                key_points_section = False
-                continue
-            
-            # 提取关键点
-            if key_points_section:
-                # 检查是否是列表项
-                if line.startswith('-') or line.startswith('*') or re.match(r'^\d+\.', line):
-                    point = re.sub(r'^[-*\d.]+\s*', '', line).strip()
-                    if point and len(point) > 5:  # 忽略太短的点
-                        data["key_points"].append(point)
-                # 检查是否在JSON数组格式中
-                elif '"' in line and not (line.startswith('{') or line.startswith('[')):
-                    # 提取引号中的内容
-                    match = re.search(r'"([^"]+)"', line)
-                    if match:
-                        point = match.group(1).strip()
-                        if point and len(point) > 5:
-                            data["key_points"].append(point)
-        
-        # 提取标签
-        tags_section = False
-        for line in lines:
-            line = line.strip()
-            
-            # 检查是否是标签部分的开始
-            if re.search(r'标签[:：]|tags[:：]', line, re.IGNORECASE):
-                tags_section = True
-                
-                # 检查是否在同一行包含标签
-                tags_part = re.sub(r'^标签[:：]|^tags[:：]', '', line, flags=re.IGNORECASE).strip()
-                if tags_part:
-                    # 尝试从JSON数组格式提取
-                    if '[' in tags_part and ']' in tags_part:
-                        try:
-                            tags_str = tags_part[tags_part.find('['):tags_part.find(']')+1]
-                            tags_list = json.loads(tags_str)
-                            if isinstance(tags_list, list):
-                                data["tags"] = [str(tag).strip() for tag in tags_list if tag]
-                                tags_section = False  # 已找到标签，停止搜索
-                        except:
-                            pass
-                    
-                    # 否则尝试按逗号分割
-                    if not data["tags"]:
-                        data["tags"] = [tag.strip() for tag in re.split(r'[,，、]', tags_part) if tag.strip()]
-                        if data["tags"]:
-                            tags_section = False  # 已找到标签，停止搜索
-                
-                continue
-            
-            # 检查是否到达了标签部分的结束
-            if tags_section and re.search(r'相关链接|related links|来源|source|key[_ ]points|关键点', line, re.IGNORECASE):
-                tags_section = False
-                continue
-            
-            # 提取标签
-            if tags_section:
-                # 检查是否在JSON数组格式中
-                if '[' in line and ']' in line:
-                    try:
-                        tags_str = line[line.find('['):line.find(']')+1]
-                        tags_list = json.loads(tags_str)
-                        if isinstance(tags_list, list):
-                            data["tags"] = [str(tag).strip() for tag in tags_list if tag]
-                            tags_section = False  # 已找到标签，停止搜索
-                    except:
-                        pass
-                
-                # 否则尝试按逗号分割或提取引号中的内容
-                elif '"' in line or ',' in line:
-                    # 提取所有引号中的内容
-                    tag_matches = re.findall(r'"([^"]+)"', line)
-                    if tag_matches:
-                        data["tags"].extend([tag.strip() for tag in tag_matches if tag.strip()])
-                    else:
-                        # 按逗号分割
-                        parts = re.split(r'[,，、]', line)
-                        data["tags"].extend([part.strip() for part in parts if part.strip()])
-        
-        # 提取相关链接
-        links_section = False
-        for i, line in enumerate(lines):
-            line = line.strip()
-            
-            # 检查是否是相关链接部分的开始
-            if re.search(r'相关链接[:：]|related[_ ]links[:：]', line, re.IGNORECASE):
-                links_section = True
-                continue
-            
-            # 检查是否到达了相关链接部分的结束
-            if links_section and re.search(r'来源|source', line, re.IGNORECASE):
-                links_section = False
-                continue
-            
-            # 提取相关链接
-            if links_section or "http" in line:
-                # 查找URL
-                url_matches = re.findall(r'https?://\S+', line)
-                for url_match in url_matches:
-                    url_clean = url_match.rstrip(',.，。;；:：')
-                    
-                    # 尝试提取描述
-                    description = ""
-                    desc_match = re.search(r'"description"\s*:\s*"([^"]+)"', line)
-                    if desc_match:
-                        description = desc_match.group(1)
-                    else:
-                        # 尝试获取URL前后的文字作为描述
-                        parts = line.split(url_clean)
-                        if len(parts) > 1:
-                            if parts[0].strip():
-                                description = parts[0].strip()
-                            elif parts[1].strip():
-                                description = parts[1].strip()
-                    
-                    if not description:
-                        # 尝试从前一行或后一行获取描述
-                        if i > 0 and not re.search(r'https?://', lines[i-1]) and len(lines[i-1].strip()) > 0:
-                            description = lines[i-1].strip()
-                        elif i < len(lines)-1 and not re.search(r'https?://', lines[i+1]) and len(lines[i+1].strip()) > 0:
-                            description = lines[i+1].strip()
-                    
-                    # 清理描述
-                    description = re.sub(r'^[-*:]|\s*[-:：]\s*$', '', description).strip()
-                    
-                    # 添加到相关链接
-                    if url_clean != url:  # 不要包含原始URL
-                        data["related_links"].append({
-                            "url": url_clean,
-                            "description": description if description else "相关链接"
-                        })
-        
-        # 确保所有字段都有合理的默认值
-        if not data["title"] or data["title"] == "未知标题":
-            # 尝试使用第一行非空文本作为标题
-            for line in lines:
-                if line.strip() and len(line.strip()) > 5 and len(line.strip()) < 100:
-                    data["title"] = line.strip()
-                    break
-        
-        if not data["summary"]:
-            # 提取前100-200个字符作为摘要
-            combined_text = " ".join(line.strip() for line in lines if line.strip())
-            data["summary"] = combined_text[:min(len(combined_text), 200)] + "..."
-        
-        if not data["key_points"] or len(data["key_points"]) < 2:
-            # 添加默认关键点
-            data["key_points"] = ["无法从文本中提取关键点，请查看原文了解详细内容。"]
-        
-        if not data["tags"] or len(data["tags"]) == 0:
-            # 提取内容中以$和#开头的文本作为标签
-            extracted_special_tags = []
-            
-            # 提取#标签
-            general_hashtag_matches = re.findall(r'#(\w+)', text)
-            if general_hashtag_matches:
-                for tag in general_hashtag_matches:
-                    if tag and len(tag) > 1 and tag.lower() not in [t.lower() for t in extracted_special_tags]:
-                        extracted_special_tags.append(tag)
-                        
-            # 提取$标签
-            dollar_tag_matches = re.findall(r'\$(\w+)', text)
-            if dollar_tag_matches:
-                for tag in dollar_tag_matches:
-                    if tag and len(tag) > 1 and tag.lower() not in [t.lower() for t in extracted_special_tags]:
-                        extracted_special_tags.append(tag)
-            
-            # 如果找到了特殊标签，使用它们
-            if extracted_special_tags:
-                data["tags"] = extracted_special_tags
-                logger.info(f"从文本中提取到的特殊标签(#和$): {data['tags']}")
-            else:
-                # 检查是否是Twitter/X.com链接
-                is_twitter = "twitter.com" in url or "x.com" in url
-                
-                if is_twitter:
-                    # 尝试从文本中提取Twitter标签
-                    hashtag_matches = re.findall(r'#(\w+)', text)
-                    if hashtag_matches:
-                        data["tags"] = list(set([tag.lower() for tag in hashtag_matches if tag]))[:5]
-                        logger.info(f"从Twitter/X文本中提取到标签: {data['tags']}")
-                
-                # 如果仍然没有标签，使用域名
-                if not data["tags"]:
-                    domain = url.split("//")[-1].split("/")[0]
-                    data["tags"] = [domain.split(".")[-2] if len(domain.split(".")) > 1 else domain]
-                    
-                    # 添加"其他"标签
-                    data["tags"].append("其他")
-        
-        logger.info(f"从文本提取数据完成，标题: {data['title']}, 标签数量: {len(data['tags'])}")
-        
-        return data

@@ -50,7 +50,7 @@ class NotionManager:
                 },
                 "标签": {
                     "multi_select": [
-                        {"name": tag} for tag in processed_data["tags"][:10]  # Notion限制，最多10个标签
+                        {"name": tag} for tag in processed_data["tags"][:2]  # 业务限制：最多2个标签
                     ]
                 },
                 "来源": {
@@ -267,7 +267,7 @@ class NotionManager:
             data = {
                 "properties": {
                     "标签": {
-                        "multi_select": [{"name": t} for t in current_tags[:10]]  # Notion限制，最多10个标签
+                        "multi_select": [{"name": t} for t in current_tags[:2]]  # 业务限制：最多2个标签
                     }
                 }
             }
@@ -346,13 +346,20 @@ class NotionManager:
             return {"success": False, "error": str(e)}
     
     def update_check_in_status(self, page_id, check_in_status):
-        """更新今日是否打卡状态"""
+        """更新今日是否打卡状态。支持传入布尔或'是'/'否'字符串。"""
         try:
+            # 兼容字符串/布尔入参
+            if isinstance(check_in_status, str):
+                normalized = check_in_status.strip()
+                is_checked = normalized == "是"
+            else:
+                is_checked = bool(check_in_status)
+
             data = {
                 "properties": {
                     "今日是否打卡": {
                         "status": {
-                            "name": "是" if check_in_status else "否"
+                            "name": "是" if is_checked else "否"
                         }
                     }
                 }
