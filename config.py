@@ -47,11 +47,16 @@ HAS_TWITTER_CONFIG = bool(TWITTER_API_KEY and TWITTER_API_SECRET and TWITTER_BEA
 # 确认是否能够使用 Twitter API（同时满足配置有效和明确启用）
 CAN_USE_TWITTER_API = USE_TWITTER_API and HAS_TWITTER_CONFIG
 
+# Scraper.tech 备用抓取接口
+SCRAPER_TECH_ENDPOINT = os.getenv('SCRAPER_TECH_ENDPOINT', 'https://api.scraper.tech/tweet.php')
+# 注意：密钥必须放在 .env 中进行统一管理，不再在代码中提供默认值
+SCRAPER_TECH_KEY = os.getenv('SCRAPER_TECH_KEY', '')
+
 # DeepSeek API 配置常量
 DEEPSEEK_API_TIMEOUT = int(os.getenv('DEEPSEEK_API_TIMEOUT', '60'))  # API请求超时时间，默认60秒
 DEEPSEEK_API_MAX_RETRIES = int(os.getenv('DEEPSEEK_API_MAX_RETRIES', '3'))  # API请求最大重试次数，默认3次
 DEEPSEEK_API_RETRY_DELAY = int(os.getenv('DEEPSEEK_API_RETRY_DELAY', '5'))  # API请求重试初始延迟时间，默认5秒
-
+RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY', '')
 
 # 记录重要配置信息
 logger = logging.getLogger(__name__)
@@ -62,4 +67,5 @@ logger.info(f"DeepSeek API 重试初始延迟: {DEEPSEEK_API_RETRY_DELAY}秒")
 logger.info(f"Twitter API 启用状态: {'已启用' if CAN_USE_TWITTER_API else '未启用'}")
 if not CAN_USE_TWITTER_API and USE_TWITTER_API:
     logger.warning("Twitter API 已启用但配置不完整，请检查API密钥设置")
+logger.info(f"Scraper.tech 备用接口已配置: {'是' if SCRAPER_TECH_KEY else '否'}")
 logger.info("==============================")

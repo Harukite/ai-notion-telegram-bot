@@ -6,6 +6,8 @@ Twitter API 模块 - 使用官方API获取推文数据
 import re
 import logging
 import tweepy
+import requests
+from requests import Response
 from config import (
     TWITTER_API_KEY, 
     TWITTER_API_SECRET, 
@@ -13,7 +15,9 @@ from config import (
     TWITTER_ACCESS_SECRET,
     TWITTER_BEARER_TOKEN,
     HAS_TWITTER_CONFIG,
-    CAN_USE_TWITTER_API
+    CAN_USE_TWITTER_API,
+    SCRAPER_TECH_ENDPOINT,
+    SCRAPER_TECH_KEY
 )
 
 logger = logging.getLogger(__name__)
@@ -99,9 +103,7 @@ class TwitterAPI:
             }
         }
         """
-        if not self.is_initialized:
-            logger.warning("Twitter API未初始化，无法获取推文数据")
-            return None
+        # 即使官方API未初始化，也允许走备用抓取
             
         try:
             # 从URL中提取推文ID
@@ -110,6 +112,11 @@ class TwitterAPI:
                 logger.warning(f"无法从URL中提取推文ID: {url}")
                 return None
                 
+            # 若官方API不可用，直接走备用
+            if not self.is_initialized:
+                logger.info(f"官方API未初始化，改用Scraper.tech抓取: {tweet_id}")
+                return self._fetch_via_scraper(tweet_id, url)
+
             logger.info(f"尝试使用官方API获取推文: {tweet_id}")
             
             # 使用API v2获取推文数据
@@ -156,8 +163,76 @@ class TwitterAPI:
             return self._parse_tweet_v2(tweet, url)
             
         except Exception as e:
-            logger.error(f"获取推文数据失败: {str(e)}")
+            err_text = str(e)
+            logger.error(f"获取推文数据失败: {err_text}")
+            # 命中429或速率限制，使用备用抓取
+            if '429' in err_text or 'Too Many Requests' in err_text or 'rate limit' in err_text.lower():
+                tweet_id = self.extract_tweet_id_from_url(url)
+                if tweet_id:
+                    logger.info(f"触发限流，改用Scraper.tech抓取: {tweet_id}")
+                    return self._fetch_via_scraper(tweet_id, url)
             return None
+
+    def _fetch_via_scraper(self, tweet_id: str, original_url: str):
+        """通过公开 scraper 接口抓取推文数据"""
+        try:
+            params = {"id": tweet_id}
+            headers = {"scraper-key": SCRAPER_TECH_KEY}
+            resp: Response = requests.get(
+                SCRAPER_TECH_ENDPOINT,
+                params=params,
+                headers=headers,
+                timeout=30
+            )
+            if resp.status_code != 200:
+                logger.error(f"Scraper.tech 返回非200: {resp.status_code} {resp.text[:200]}")
+                return None
+            data = resp.json()
+            return self._parse_scraper_payload(data, original_url)
+        except Exception as e:
+            logger.error(f"调用 Scraper.tech 出错: {str(e)}")
+            return None
+
+    def _parse_scraper_payload(self, data: dict, original_url: str):
+        """解析 scraper 返回的 JSON 形成统一 tweet_data 结构"""
+        if not isinstance(data, dict):
+            return None
+
+        # 文本内容优先 display_text，否则 text
+        content = data.get("display_text") or data.get("text") or ""
+        author_obj = data.get("author") or {}
+        author = author_obj.get("name")
+        username = author_obj.get("screen_name")
+
+        # hashtags 提取
+        hashtags = []
+        entities = data.get("entities") or {}
+        if isinstance(entities, dict) and isinstance(entities.get("hashtags"), list):
+            # entities.hashtags 可能是对象列表或字符串列表，兼容两者
+            for h in entities.get("hashtags", []):
+                if isinstance(h, dict) and ("text" in h or "tag" in h):
+                    hashtags.append(h.get("text") or h.get("tag"))
+                elif isinstance(h, str):
+                    hashtags.append(h)
+
+        tweet_data = {
+            "title": f"{author or '未知作者'}的推文" if author else "推文",
+            "content": content,
+            "url": original_url,
+            "source": "X" if "x.com" in original_url else "Twitter",
+            "extracted_tags": hashtags,
+            "tweet_meta": {
+                "platform": "X" if "x.com" in original_url else "Twitter",
+                "author": author,
+                "username": username,
+                "date": data.get("created_at"),
+                "tags": hashtags,
+                "mentions": [m.get("screen_name") for m in (entities.get("user_mentions") or []) if isinstance(m, dict) and m.get("screen_name")],
+                "via": "scraper_tech"
+            }
+        }
+        logger.info("成功通过 Scraper.tech 解析推文数据")
+        return tweet_data
             
     def _parse_tweet_v2(self, tweet_response, original_url):
         """解析API v2返回的推文数据"""

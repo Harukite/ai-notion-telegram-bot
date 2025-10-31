@@ -14,6 +14,13 @@ from config import TELEGRAM_BOT_TOKEN
 from content_processor import ContentProcessor
 from notion_manager import NotionManager
 
+def escape_markdown(text):
+    """转义 Telegram Markdown V1 特殊字符"""
+    if not text:
+        return ""
+    # Telegram Markdown V1 需要转义 _ * [ ] ( ) ~ ` > # + - = | { } . !
+    return re.sub(r'([_\*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
+
 # 配置日志
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -169,9 +176,10 @@ async def process_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             
         if has_error:
             # 如果处理过程出现错误，不保存到Notion，直接显示错误信息
+            error_summary = escape_markdown(processed_data.get('summary', '处理过程中出现错误'))
             error_message = (
                 f"❌ 处理链接时遇到问题，内容未保存到Notion\n\n"
-                f"*原因:* {processed_data.get('summary', '处理过程中出现错误')}\n\n"
+                f"*原因:* {error_summary}\n\n"
                 f"请稍后再试，或尝试其他链接。"
             )
             await processing_message.edit_text(error_message, parse_mode='Markdown')
@@ -182,12 +190,17 @@ async def process_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         
         if result["success"]:
             # 构建响应消息
+            title = escape_markdown(processed_data['title'])
+            tags = escape_markdown(', '.join(processed_data['tags']))
+            source = escape_markdown(processed_data['source'])
+            summary = escape_markdown(processed_data['summary'][:200])
+            
             response = (
                 f"✅ 内容已成功保存到Notion!\n\n"
-                f"*标题:* {processed_data['title']}\n"
-                f"*标签:* {', '.join(processed_data['tags'])}\n"
-                f"*来源:* {processed_data['source']}\n\n"
-                f"*摘要:*\n{processed_data['summary'][:200]}...\n"
+                f"*标题:* {title}\n"
+                f"*标签:* {tags}\n"
+                f"*来源:* {source}\n\n"
+                f"*摘要:*\n{summary}...\n"
             )
             
             # 创建内联键盘用于后续操作
@@ -205,14 +218,16 @@ async def process_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 parse_mode='Markdown'
             )
         else:
+            error_msg = escape_markdown(result.get('error', '未知错误'))
             await processing_message.edit_text(
-                f"❌ 保存到Notion时出错: {result.get('error', '未知错误')}\n\n请稍后再试。"
+                f"❌ 保存到Notion时出错: {error_msg}\n\n请稍后再试。"
             )
     
     except Exception as e:
         logger.error(f"处理链接时出错: {str(e)}")
+        error_msg = escape_markdown(str(e))
         await processing_message.edit_text(
-            f"❌ 处理链接时出错: {str(e)}\n\n请稍后再试。"
+            f"❌ 处理链接时出错: {error_msg}\n\n请稍后再试。"
         )
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -254,8 +269,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 parse_mode='Markdown'
             )
         else:
+            error_msg = escape_markdown(result.get('error', '未知错误'))
             await query.edit_message_text(
-                f"{query.message.text}\n\n❌ 更新状态失败: {result.get('error', '未知错误')}",
+                f"{query.message.text}\n\n❌ 更新状态失败: {error_msg}",
                 parse_mode='Markdown'
             )
     
@@ -294,8 +310,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 parse_mode='Markdown'
             )
         else:
+            error_msg = escape_markdown(result.get('error', '未知错误'))
             await query.edit_message_text(
-                f"❌ 删除条目失败: {result.get('error', '未知错误')}",
+                f"❌ 删除条目失败: {error_msg}",
                 parse_mode='Markdown'
             )
             
@@ -328,8 +345,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     parse_mode='Markdown'
                 )
             else:
+                error_msg = escape_markdown(count_result.get('error', '未知错误'))
                 await query.edit_message_text(
-                    f"{query.message.text}\n\n*今日打卡状态已更新为:* {status_value}\n❌ 但打卡次数增加失败: {count_result.get('error', '未知错误')}",
+                    f"{query.message.text}\n\n*今日打卡状态已更新为:* {status_value}\n❌ 但打卡次数增加失败: {error_msg}",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("返回", callback_data=f"show_entry:{page_id}")]]),
                     parse_mode='Markdown'
                 )
@@ -340,8 +358,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 parse_mode='Markdown'
             )
         else:
+            error_msg = escape_markdown(result.get('error', '未知错误'))
             await query.edit_message_text(
-                f"{query.message.text}\n\n❌ 更新打卡状态失败: {result.get('error', '未知错误')}",
+                f"{query.message.text}\n\n❌ 更新打卡状态失败: {error_msg}",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("返回", callback_data=f"show_entry:{page_id}")]]),
                 parse_mode='Markdown'
             )
@@ -370,8 +389,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 parse_mode='Markdown'
             )
         else:
+            error_msg = escape_markdown(result.get('error', '未知错误'))
             await query.edit_message_text(
-                f"{query.message.text}\n\n❌ 更新提醒状态失败: {result.get('error', '未知错误')}",
+                f"{query.message.text}\n\n❌ 更新提醒状态失败: {error_msg}",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("返回", callback_data=f"show_entry:{page_id}")]]),
                 parse_mode='Markdown'
             )
@@ -380,8 +400,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         tag = page_id  # 重命名更清晰
         
         # 告知用户正在加载
+        escaped_tag = escape_markdown(tag)
         await query.edit_message_text(
-            f"正在获取标签为 '{tag}' 的条目...",
+            f"正在获取标签为 '{escaped_tag}' 的条目...",
             parse_mode='Markdown'
         )
         
@@ -390,18 +411,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         if not entries:
             await query.edit_message_text(
-                f"没有找到带有标签 '{tag}' 的条目。",
+                f"没有找到带有标签 '{escaped_tag}' 的条目。",
                 parse_mode='Markdown'
             )
             return
         
         # 创建条目列表
-        message_text = f"*标签 '{tag}' 的条目:*\n\n"
+        message_text = f"*标签 '{escaped_tag}' 的条目:*\n\n"
         
         keyboard = []
         for entry in entries:
-            title = entry["title"] or "无标题"
-            status = entry["status"] or "未知状态"
+            title = escape_markdown(entry["title"] or "无标题")
+            status = escape_markdown(entry["status"] or "未知状态")
             entry_id = entry["id"]
             
             # 添加条目信息
@@ -438,15 +459,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         
         # 构建详细信息
-        title = entry["title"] or "无标题"
-        summary = entry["summary"] or "无摘要"
-        status = entry["status"] or "未知状态"
+        title = escape_markdown(entry["title"] or "无标题")
+        summary = escape_markdown(entry["summary"] or "无摘要")
+        status = escape_markdown(entry["status"] or "未知状态")
         tags = entry["tags"] or []
-        tags_text = ", ".join(tags) if tags else "无标签"
-        source = entry["source"] or "无来源"
+        tags_text = escape_markdown(", ".join(tags) if tags else "无标签")
+        source = escape_markdown(entry["source"] or "无来源")
         url = entry["url"] or "#"
         reminder = entry.get("reminder", False)
-        check_in_status = entry.get("check_in_status", "否")
+        check_in_status = escape_markdown(entry.get("check_in_status", "否"))
         check_in_count = entry.get("check_in_count", 0)
         
         message_text = (
@@ -591,12 +612,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             
             keyboard = []
             for entry in entries:
-                title = entry["title"] or "无标题"
-                status = entry["status"] or "未知状态"
+                title = escape_markdown(entry["title"] or "无标题")
+                status = escape_markdown(entry["status"] or "未知状态")
                 entry_id = entry["id"]
                 
                 # 添加条目信息和摘要
-                summary = entry["summary"] or "无摘要"
+                summary = escape_markdown(entry["summary"] or "无摘要")
                 message_text += f"• *{title}* ({status})\n"
                 message_text += f"  {summary[:100]}...\n\n"
                 
@@ -890,8 +911,9 @@ async def process_tag_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     parse_mode='Markdown'
                 )
             else:
+                error_msg = escape_markdown(result.get('error', '未知错误'))
                 await update.message.reply_text(
-                    f"❌ 添加标签失败: {result.get('error', '未知错误')}",
+                    f"❌ 添加标签失败: {error_msg}",
                     parse_mode='Markdown'
                 )
                 
@@ -958,8 +980,9 @@ async def process_tag_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 filtered_entries.append(entry)
         
         if not filtered_entries:
+            escaped_keyword = escape_markdown(keyword)
             await loading_message.edit_text(
-                f"没有找到包含 '{keyword}' 的条目。",
+                f"没有找到包含 '{escaped_keyword}' 的条目。",
                 parse_mode='Markdown'
             )
             # 重置状态
@@ -967,12 +990,13 @@ async def process_tag_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         
         # 创建条目列表
-        message_text = f"*搜索 '{keyword}' 的结果:*\n\n"
+        escaped_keyword = escape_markdown(keyword)
+        message_text = f"*搜索 '{escaped_keyword}' 的结果:*\n\n"
         
         keyboard = []
         for entry in filtered_entries:
-            title = entry["title"] or "无标题"
-            status = entry["status"] or "未知状态"
+            title = escape_markdown(entry["title"] or "无标题")
+            status = escape_markdown(entry["status"] or "未知状态")
             entry_id = entry["id"]
             
             # 添加条目信息
@@ -1067,11 +1091,6 @@ async def show_recent_entries(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     
     # 创建条目列表
-    import re
-    def escape_markdown(text):
-        # Telegram Markdown V1 需要转义 _ * [ ] ( ) ~ ` > # + - = | { } . !
-        return re.sub(r'([_\*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
-
     message_text = "*最近添加的条目:*\n\n"
     keyboard = []
     for entry in entries:
@@ -1107,7 +1126,8 @@ async def set_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if result.get("success"):
         await update.message.reply_text(f"提醒状态已{'开启' if new_status else '关闭'}。", parse_mode='Markdown')
     else:
-        await update.message.reply_text(f"提醒状态更新失败: {result.get('error')}", parse_mode='Markdown')
+        error_msg = escape_markdown(result.get('error', '未知错误'))
+        await update.message.reply_text(f"提醒状态更新失败: {error_msg}", parse_mode='Markdown')
 
 async def check_in(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """标记今日是否打卡"""
@@ -1121,7 +1141,8 @@ async def check_in(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         notion_manager.increment_check_in_count(page_id)
         await update.message.reply_text("今日打卡成功！已为该条目增加一次打卡计数。", parse_mode='Markdown')
     else:
-        await update.message.reply_text(f"打卡失败: {result.get('error')}", parse_mode='Markdown')
+        error_msg = escape_markdown(result.get('error', '未知错误'))
+        await update.message.reply_text(f"打卡失败: {error_msg}", parse_mode='Markdown')
 
 async def check_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """查看打卡次数"""

@@ -1,8 +1,16 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
+import re
 from notion_manager import NotionManager
 from config import TELEGRAM_BOT_TOKEN,TARGET_CHAT_ID
 from telegram import Bot
+
+def escape_markdown(text):
+    """转义 Telegram Markdown V1 特殊字符"""
+    if not text:
+        return ""
+    # Telegram Markdown V1 需要转义 _ * [ ] ( ) ~ ` > # + - = | { } . !
+    return re.sub(r'([_\*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
 
 # 初始化 Notion 管理器和 Telegram Bot
 notion_manager = NotionManager()
@@ -13,7 +21,7 @@ def check_and_notify():
     if entries:
         msg = "以下内容还未打卡，请及时完成：\n"
         for entry in entries:
-            title = entry["title"] or "无标题"
+            title = escape_markdown(entry["title"] or "无标题")
             check_in_status = entry.get("check_in_status", "否")
             if check_in_status != "是":
                 msg += f"- {title}\n"
