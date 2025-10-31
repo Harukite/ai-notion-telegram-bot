@@ -163,6 +163,41 @@ class NotionManager:
             logger.error(f"添加内容到Notion失败: {str(e)}")
             return {"success": False, "error": str(e)}
     
+    def find_entry_by_link(self, url: str):
+        """根据'链接'属性精确查找是否已存在相同链接，存在则返回{id,title}，否则None"""
+        try:
+            if not url:
+                return None
+            data = {
+                "filter": {
+                    "property": "链接",
+                    "url": {
+                        "equals": url
+                    }
+                },
+                "page_size": 1
+            }
+            response = requests.post(
+                f"{self.api_url}/databases/{self.database_id}/query",
+                headers=self.headers,
+                json=data
+            )
+            if response.status_code != 200:
+                logger.error(f"查询重复链接失败: HTTP {response.status_code}")
+                return None
+            result = response.json()
+            results = result.get("results", [])
+            if not results:
+                return None
+            page = results[0]
+            return {
+                "id": page.get("id"),
+                "title": self._get_property_value(page, "标题", "title")
+            }
+        except Exception as e:
+            logger.error(f"查找链接时出错: {str(e)}")
+            return None
+
     def get_entries_by_tag(self, tag):
         """根据标签获取数据库条目"""
         try:

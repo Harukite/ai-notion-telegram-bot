@@ -185,7 +185,20 @@ async def process_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await processing_message.edit_text(error_message, parse_mode='Markdown')
             return
         
-        # 内容处理成功，将内容保存到Notion
+        # 内容处理成功，先检查是否已存在相同链接
+        existing = notion_manager.find_entry_by_link(processed_data.get('original_url'))
+        if existing:
+            title_existing = escape_markdown(existing.get('title') or '无标题')
+            url_existing = processed_data.get('original_url')
+            keyboard = [[InlineKeyboardButton("查看已存在的条目", callback_data=f"show_entry:{existing['id']}")]]
+            await processing_message.edit_text(
+                f"ℹ️ 该链接已存在，不重复添加。\n\n*标题:* {title_existing}\n*链接:* {url_existing}",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+            return
+        
+        # 未重复，保存到Notion
         result = notion_manager.add_content_to_database(processed_data)
         
         if result["success"]:
@@ -305,10 +318,39 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         result = notion_manager.delete_entry(page_id)
         
         if result["success"]:
-            await query.edit_message_text(
-                f"✅ 条目已成功删除!",
-                parse_mode='Markdown'
-            )
+            # 若用户来自“最近添加”视图，则删除后返回该列表
+            if context.user_data.get("last_view") == "recent":
+                entries = notion_manager.get_entries_with_details(limit=5)
+                if not entries:
+                    await query.edit_message_text(
+                        "*最近添加*\n\n目前没有任何条目。",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    message_text = "*最近添加的条目:*\n\n"
+                    keyboard = []
+                    for entry in entries:
+                        title = escape_markdown(entry["title"] or "无标题")
+                        status = escape_markdown(entry["status"] or "未知状态")
+                        entry_id_next = entry["id"]
+                        summary = escape_markdown(entry["summary"] or "无摘要")
+                        message_text += f"• *{title}* ({status})\n"
+                        message_text += f"  {summary[:100]}...\n\n"
+                        keyboard.append([InlineKeyboardButton(
+                            f"{title[:20]}...",
+                            callback_data=f"show_entry:{entry_id_next}"
+                        )])
+                    keyboard.append([InlineKeyboardButton("返回主菜单", callback_data="back_to_menu")])
+                    await query.edit_message_text(
+                        message_text,
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        parse_mode='Markdown'
+                    )
+            else:
+                await query.edit_message_text(
+                    f"✅ 条目已成功删除!",
+                    parse_mode='Markdown'
+                )
         else:
             error_msg = escape_markdown(result.get('error', '未知错误'))
             await query.edit_message_text(
@@ -597,6 +639,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     elif action == "menu_recent":
         # 获取最近添加的条目
+        # 记录最近视图，用于删除等操作后返回
+        context.user_data["last_view"] = "recent"
         entries = notion_manager.get_entries_with_details(limit=5)
         
         if not entries:
@@ -1083,6 +1127,9 @@ async def show_recent_entries(update: Update, context: ContextTypes.DEFAULT_TYPE
     # 告知用户正在加载
     loading_message = await update.message.reply_text("正在获取最近添加的条目...")
     
+    # 记录最近视图，用于删除等操作后返回
+    context.user_data["last_view"] = "recent"
+
     # 获取最近添加的条目
     entries = notion_manager.get_entries_with_details(limit=5)
     
