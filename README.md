@@ -3,6 +3,15 @@
 这是一个功能强大的 Telegram 机器人，可以将网页链接处理为结构化内容，并保存到 Notion 数据库中，帮助用户有效整理和管理网络信息。
 平时撸猫信息太多太杂，使用X的收藏夹 ，内容一多 就不好整理了，所以做了这么一个机器人工具，方便自己整理信息
 
+#### 直接发送推特链接给机器人
+<img width="795" height="760" alt="image" src="https://github.com/user-attachments/assets/11e25f39-5983-423d-a090-d65c9bafd1a2" />
+
+#### 解析完毕之后就会在notion中显示
+<img width="1775" height="79" alt="image" src="https://github.com/user-attachments/assets/1dde7192-a370-4d8c-a6f2-b2a6f701f1ef" />
+
+
+
+
 ## 主要功能
 
 1. **网页内容提取与分析**
