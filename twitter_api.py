@@ -35,6 +35,12 @@ class TwitterAPI:
                 logger.warning("Twitter API配置不完整，无法使用官方API获取推文")
             else:
                 logger.info("Twitter API已禁用，若要启用请将USE_TWITTER_API设置为true")
+            
+            # 即使官方API被禁用，如果有Scraper配置，仍然允许初始化对象以便使用scraper fallback
+            # 但不会初始化tweepy客户端
+            if SCRAPER_TECH_KEY:
+                logger.info("官方API禁用，但Scraper.tech配置有效，将使用Scraper作为抓取方式")
+                return
             return
             
         try:
@@ -165,12 +171,11 @@ class TwitterAPI:
         except Exception as e:
             err_text = str(e)
             logger.error(f"获取推文数据失败: {err_text}")
-            # 命中429或速率限制，使用备用抓取
-            if '429' in err_text or 'Too Many Requests' in err_text or 'rate limit' in err_text.lower():
-                tweet_id = self.extract_tweet_id_from_url(url)
-                if tweet_id:
-                    logger.info(f"触发限流，改用Scraper.tech抓取: {tweet_id}")
-                    return self._fetch_via_scraper(tweet_id, url)
+            # 任何错误都尝试使用备用抓取，确保尽可能获取内容
+            tweet_id = self.extract_tweet_id_from_url(url)
+            if tweet_id:
+                logger.info(f"官方API调用失败，改用Scraper.tech抓取: {tweet_id}")
+                return self._fetch_via_scraper(tweet_id, url)
             return None
 
     def _fetch_via_scraper(self, tweet_id: str, original_url: str):

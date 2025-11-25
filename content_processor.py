@@ -54,28 +54,27 @@ class ContentProcessor:
         
     def _get_twitter_content_via_api(self, url):
         """使用Twitter API直接获取推文内容（如果配置了API）"""
-        if not CAN_USE_TWITTER_API or not HAS_TWEEPY:
-            if not HAS_TWITTER_CONFIG:
-                logger.info("未配置Twitter API，无法使用API获取推文")
-            elif not CAN_USE_TWITTER_API:
-                logger.info("Twitter API已禁用，如需启用请设置USE_TWITTER_API=true")
-            else:
-                logger.info("未安装tweepy库，无法使用API获取推文")
+        if not HAS_TWEEPY:
+            logger.info("未安装tweepy库，无法使用API获取推文")
             return None
             
+        # 即便未配置官方API (CAN_USE_TWITTER_API=False)，
+        # 只要安装了tweepy，我们仍尝试调用 twitter_api.get_tweet_data()，
+        # 因为该模块内部封装了 Scraper.tech 的备用抓取逻辑。
+        
         try:
             # 使用Twitter API获取推文
-            logger.info(f"尝试使用Twitter API直接获取推文: {url}")
+            logger.info(f"尝试使用Twitter API模块获取推文: {url}")
             tweet_data = twitter_api.get_tweet_data(url)
             
             if tweet_data and isinstance(tweet_data, dict) and 'content' in tweet_data:
-                logger.info(f"成功使用Twitter API获取推文内容")
+                logger.info(f"成功使用Twitter API模块获取推文内容")
                 return tweet_data
             else:
-                logger.warning("Twitter API返回数据为空或格式不正确")
+                logger.warning("Twitter API模块返回数据为空或格式不正确")
                 return None
         except Exception as e:
-            logger.error(f"使用Twitter API获取推文时出错: {str(e)}")
+            logger.error(f"使用Twitter API模块获取推文时出错: {str(e)}")
             return None
     
     def _fetch_webpage_content(self, url, max_length=MAX_CONTENT_LENGTH):
@@ -91,8 +90,8 @@ class ContentProcessor:
                     "source": url.split("//")[-1].split("/")[0] if "//" in url else url
                 }
 
-            # 1) 官方 Twitter API（如可用）
-            if CAN_USE_TWITTER_API and HAS_TWEEPY:
+            # 1) 尝试使用 Twitter API 模块 (含 Scraper.tech 备用)
+            if HAS_TWEEPY:
                 api_result = self._get_twitter_content_via_api(url)
                 if api_result:
                     return api_result
@@ -187,11 +186,23 @@ class ContentProcessor:
     def fetch_webpage_content(self, url, max_length=MAX_CONTENT_LENGTH):
         """同步方式抓取网页内容（非x.com）"""
         try:
-            resp = requests.get(url, timeout=15)
+            logger.info(f"开始抓取网页: {url}")
+            # 添加 User-Agent 防止被简单拦截
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+            resp = requests.get(url, headers=headers, timeout=15)
+            logger.info(f"网页抓取状态码: {resp.status_code}, 原始长度: {len(resp.content)}")
             resp.raise_for_status()
+            
             soup = BeautifulSoup(resp.content, 'html.parser')
             title = soup.title.string.strip() if soup.title and soup.title.string else '未知标题'
             content = soup.get_text(separator='\n', strip=True)
+            
+            logger.info(f"解析后标题: {title}, 内容长度: {len(content)}")
+            if len(content) < 100:
+                 logger.warning(f"内容过短，前100字符: {content[:100]!r}")
+
             # 限制最大长度
             if len(content) > max_length:
                 content = content[:max_length]
@@ -242,14 +253,16 @@ class ContentProcessor:
     def process_link(self, url):
         """处理链接并返回结构化内容（支持x.com和普通网页）"""
         is_twitter = "twitter.com" in url or "x.com" in url or "nitter" in url
-        if is_twitter and CAN_USE_TWITTER_API and HAS_TWEEPY:
+        # 只要安装了 tweepy 库，就尝试使用 twitter_api 模块处理
+        # 该模块内部会自动判断使用官方 API 还是 Scraper.tech 备用
+        if is_twitter and HAS_TWEEPY:
             webpage_data = self._get_twitter_content_via_api(url)
             if not webpage_data:
-                logger.error(f"无法通过Twitter API获取内容: {url}")
+                logger.error(f"无法通过Twitter API/Scraper获取内容: {url}")
                 return {
                     "title": "获取失败",
-                    "summary": "无法通过API获取内容。请检查API配置或推文链接是否有效。",
-                    "key_points": ["无法获取内容", "请检查URL是否正确", "API配置是否有效"],
+                    "summary": "无法获取推文内容。可能是API配置问题、密钥失效或链接无效。",
+                    "key_points": ["无法获取内容", "请检查URL是否正确", "API/Scraper配置是否有效"],
                     "tags": ["访问失败", "内容缺失"],
                     "related_links": [],
                     "source": "Twitter",
