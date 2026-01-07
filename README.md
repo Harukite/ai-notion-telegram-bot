@@ -51,14 +51,17 @@
 
 ```
 ai-notion/
-├── bot.py               # 主机器人应用
-├── config.py            # 配置和环境变量
-├── content_processor.py # 内容处理与 AI 分析
-├── notion_manager.py    # Notion 数据库管理
-├── twitter_api.py       # Twitter API 交互
-├── USER_GUIDE.md        # 用户指南
+├── app/                 # 核心应用源码
+│   ├── core/            # 核心业务逻辑
+│   ├── services/        # 外部服务接口 (Twitter, Notion)
+│   ├── common/          # 通用工具和配置
+│   └── main.py          # 程序入口
+├── scripts/             # 维护和检查脚本
+├── start.sh             # 启动脚本
+├── .env                 # 环境变量配置
 ├── requirements.txt     # 依赖项
-└── install_dependencies.sh # 环境设置脚本
+├── USER_GUIDE.md        # 用户指南
+└── README.md            # 说明文档
 ```
 
 ## 安装与配置
@@ -72,7 +75,7 @@ cd ai-notion
 2. 安装依赖：
 ```bash
 # 使用自动安装脚本
-./install_dependencies.sh
+./scripts/install_dependencies.sh
 
 # 或手动安装
 python -m venv venv
@@ -102,7 +105,9 @@ USE_TWITTER_API=false  # 设为true启用Twitter API
 
 1. 启动机器人：
 ```bash
-python bot.py
+./start.sh
+# 或者
+python3 -m app.main
 ```
 
 2. 在 Telegram 中使用:

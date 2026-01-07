@@ -10,9 +10,9 @@ from telegram.ext import (
     filters
 )
 
-from config import TELEGRAM_BOT_TOKEN
-from content_processor import ContentProcessor
-from notion_manager import NotionManager
+from app.config import TELEGRAM_BOT_TOKEN
+from app.core.content_processor import ContentProcessor
+from app.services.notion_service import NotionManager
 
 def escape_markdown(text):
     """转义 Telegram Markdown V1 特殊字符"""

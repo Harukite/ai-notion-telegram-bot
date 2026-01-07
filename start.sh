@@ -12,8 +12,8 @@ source venv/bin/activate
 
 # 运行环境检查
 echo "检查环境..."
-python check_environment.py
-python check_twitter_api.py
+python scripts/check_environment.py
+python scripts/check_twitter_api.py
 
 # 检查上一命令的退出状态
 if [ $? -ne 0 ]; then
@@ -23,4 +23,4 @@ fi
 
 # 启动机器人
 echo "启动 Telegram 机器人..."
-python bot.py
+python3 -m app.main

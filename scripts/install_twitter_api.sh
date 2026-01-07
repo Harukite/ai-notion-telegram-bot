@@ -58,6 +58,6 @@ else
 fi
 
 echo -e "${YELLOW}\n=== Twitter API 配置检查 ===${NC}"
-python3 check_twitter_api.py
+python3 "$(dirname "$0")/check_twitter_api.py"
 
 echo -e "${GREEN}\n完成!${NC}"

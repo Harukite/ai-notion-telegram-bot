@@ -12,4 +12,4 @@ else
 fi
 
 echo "安装完成。请确保.env文件中配置了所有必要的环境变量。"
-echo "启动机器人: python bot.py"
+echo "启动机器人: ./start.sh"

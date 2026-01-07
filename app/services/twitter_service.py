@@ -8,7 +8,7 @@ import logging
 import tweepy
 import requests
 from requests import Response
-from config import (
+from app.config import (
     TWITTER_API_KEY, 
     TWITTER_API_SECRET, 
     TWITTER_ACCESS_TOKEN, 
@@ -17,7 +17,8 @@ from config import (
     HAS_TWITTER_CONFIG,
     CAN_USE_TWITTER_API,
     SCRAPER_TECH_ENDPOINT,
-    SCRAPER_TECH_KEY
+    SCRAPER_TECH_KEY,
+    RAPIDAPI_KEY
 )
 
 logger = logging.getLogger(__name__)
@@ -29,18 +30,19 @@ class TwitterAPI:
         self.client_v2 = None
         self.is_initialized = False
         
+        # 优先检查 Scraper.tech 配置
+        if SCRAPER_TECH_KEY:
+            logger.info("使用 Scraper.tech 作为主要推文获取方式")
+            # 标记为已初始化(逻辑上)，虽然没有tweepy客户端，但功能可用
+            self.is_initialized = False 
+            return
+
         # 检查是否启用且配置完整
         if not CAN_USE_TWITTER_API:
             if not HAS_TWITTER_CONFIG:
-                logger.warning("Twitter API配置不完整，无法使用官方API获取推文")
+                logger.warning("Twitter API配置不完整，且未配置Scraper.tech，无法获取推文")
             else:
-                logger.info("Twitter API已禁用，若要启用请将USE_TWITTER_API设置为true")
-            
-            # 即使官方API被禁用，如果有Scraper配置，仍然允许初始化对象以便使用scraper fallback
-            # 但不会初始化tweepy客户端
-            if SCRAPER_TECH_KEY:
-                logger.info("官方API禁用，但Scraper.tech配置有效，将使用Scraper作为抓取方式")
-                return
+                logger.info("Twitter API已禁用")
             return
             
         try:
@@ -120,8 +122,8 @@ class TwitterAPI:
                 
             # 若官方API不可用，直接走备用
             if not self.is_initialized:
-                logger.info(f"官方API未初始化，改用Scraper.tech抓取: {tweet_id}")
-                return self._fetch_via_scraper(tweet_id, url)
+                logger.info(f"官方API未初始化，尝试使用备用接口抓取: {tweet_id}")
+                return self._fetch_with_fallback(tweet_id, url)
 
             logger.info(f"尝试使用官方API获取推文: {tweet_id}")
             
@@ -174,9 +176,25 @@ class TwitterAPI:
             # 任何错误都尝试使用备用抓取，确保尽可能获取内容
             tweet_id = self.extract_tweet_id_from_url(url)
             if tweet_id:
-                logger.info(f"官方API调用失败，改用Scraper.tech抓取: {tweet_id}")
-                return self._fetch_via_scraper(tweet_id, url)
+                logger.info(f"官方API调用失败，改用备用接口抓取: {tweet_id}")
+                return self._fetch_with_fallback(tweet_id, url)
             return None
+
+    def _fetch_with_fallback(self, tweet_id: str, url: str):
+        """尝试所有可用的备用抓取方式"""
+        # 1. 优先尝试 Scraper.tech
+        if SCRAPER_TECH_KEY:
+            result = self._fetch_via_scraper(tweet_id, url)
+            if result:
+                return result
+            logger.warning(f"Scraper.tech 抓取失败/无响应，尝试 RapidAPI: {tweet_id}")
+        
+        # 2. 尝试 RapidAPI Fallback
+        if RAPIDAPI_KEY:
+            return self._fetch_via_rapidapi(tweet_id, url)
+            
+        logger.error("所有备用接口均无法获取数据")
+        return None
 
     def _fetch_via_scraper(self, tweet_id: str, original_url: str):
         """通过公开 scraper 接口抓取推文数据"""
@@ -196,6 +214,30 @@ class TwitterAPI:
             return self._parse_scraper_payload(data, original_url)
         except Exception as e:
             logger.error(f"调用 Scraper.tech 出错: {str(e)}")
+            return None
+
+    def _fetch_via_rapidapi(self, tweet_id: str, original_url: str):
+        """通过 RapidAPI 接口抓取推文数据 (备用)"""
+        try:
+            url = "https://twitter-api45.p.rapidapi.com/tweet.php"
+            querystring = {"id": tweet_id}
+            headers = {
+                "x-rapidapi-key": RAPIDAPI_KEY,
+                "x-rapidapi-host": "twitter-api45.p.rapidapi.com"
+            }
+            
+            logger.info(f"正在尝试 RapidAPI 备用接口: {tweet_id}")
+            resp = requests.get(url, headers=headers, params=querystring, timeout=30)
+            
+            if resp.status_code != 200:
+                logger.error(f"RapidAPI 返回非200: {resp.status_code} {resp.text[:200]}")
+                return None
+                
+            data = resp.json()
+            # 用户确认 RapidAPI 返回结构与 Scraper.tech 一致，直接复用解析逻辑
+            return self._parse_scraper_payload(data, original_url)
+        except Exception as e:
+            logger.error(f"调用 RapidAPI 出错: {str(e)}")
             return None
 
     def _parse_scraper_payload(self, data: dict, original_url: str):

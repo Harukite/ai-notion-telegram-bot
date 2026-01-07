@@ -64,8 +64,13 @@ logger.info("======== 系统配置信息 ========")
 logger.info(f"DeepSeek API 超时设置: {DEEPSEEK_API_TIMEOUT}秒")
 logger.info(f"DeepSeek API 最大重试次数: {DEEPSEEK_API_MAX_RETRIES}次")
 logger.info(f"DeepSeek API 重试初始延迟: {DEEPSEEK_API_RETRY_DELAY}秒")
-logger.info(f"Twitter API 启用状态: {'已启用' if CAN_USE_TWITTER_API else '未启用'}")
-if not CAN_USE_TWITTER_API and USE_TWITTER_API:
-    logger.warning("Twitter API 已启用但配置不完整，请检查API密钥设置")
-logger.info(f"Scraper.tech 备用接口已配置: {'是' if SCRAPER_TECH_KEY else '否'}")
+logger.info(f"DeepSeek API 重试初始延迟: {DEEPSEEK_API_RETRY_DELAY}秒")
+if SCRAPER_TECH_KEY:
+    logger.info("Twitter 数据获取模式: Scraper.tech (通过代理接口)")
+    if RAPIDAPI_KEY:
+        logger.info("RapidAPI 备用接口已配置: 是")
+else:
+    logger.info(f"Twitter API 启用状态: {'已启用' if CAN_USE_TWITTER_API else '未启用'}")
+    if not CAN_USE_TWITTER_API and USE_TWITTER_API:
+        logger.warning("Twitter API 已启用但配置不完整")
 logger.info("==============================")

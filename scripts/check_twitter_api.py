@@ -9,6 +9,8 @@ import os
 import sys
 from dotenv import load_dotenv
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 # 配置日志
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -73,22 +75,31 @@ def main():
     config_complete = check_twitter_config()
     
     print("\n=== 检测结果汇总 ===")
+    
+    # 检查Scraper.tech配置
+    from app.config import SCRAPER_TECH_KEY
+    if SCRAPER_TECH_KEY:
+        print("✅ Scraper.tech 配置已检测到")
+        print("系统将优先使用 Scraper.tech 接口获取推文数据 (推荐)")
+        if not tweepy_installed:
+             print("⚠️ 注意: tweepy库未安装，但这不影响 Scraper.tech 的使用")
+        return
+
     if tweepy_installed and config_complete:
         print("✅ Twitter API环境配置完成，可以正常使用")
     elif tweepy_installed:
         print("⚠️ tweepy库已安装，但API配置不完整")
         print("请在.env文件中正确配置Twitter API密钥并设置USE_TWITTER_API=true")
+        print("或者配置 SCRAPER_TECH_KEY 使用第三方接口(推荐)")
     elif config_complete:
         print("⚠️ API配置完整，但缺少tweepy库")
         print("请运行 pip install tweepy 安装所需库")
     else:
-        print("❌ Twitter API环境配置不完整，无法使用")
-        print("1. 请安装tweepy库: pip install tweepy")
-        print("2. 在.env文件中配置正确的API密钥")
-        print("3. 设置USE_TWITTER_API=true启用Twitter API")
+        print("❌ Twitter API环境配置不完整")
+        print("建议配置 SCRAPER_TECH_KEY 以使用 Scraper.tech 接口 (无需官方API)")
     
     print("\n如不需要使用Twitter API，可忽略上述警告。")
-    print("当设置USE_TWITTER_API=false时，系统将只使用网页抓取方式获取推文内容。")
+    print("当设置USE_TWITTER_API=false且无Scraper配置时，系统将只使用网页抓取方式获取推文内容。")
 
 if __name__ == "__main__":
     main()

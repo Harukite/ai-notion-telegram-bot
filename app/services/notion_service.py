@@ -3,7 +3,7 @@ import requests
 import json
 import logging
 from datetime import datetime
-from config import NOTION_API_TOKEN, NOTION_DATABASE_ID
+from app.config import NOTION_API_TOKEN, NOTION_DATABASE_ID
 
 logger = logging.getLogger(__name__)
 

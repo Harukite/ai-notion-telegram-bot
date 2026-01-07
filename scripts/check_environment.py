@@ -1,6 +1,9 @@
-from dotenv import load_dotenv
 import os
 import sys
+from dotenv import load_dotenv
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 
 def check_dependencies():
     """检查和安装依赖"""

@@ -1,8 +1,8 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
 import re
-from notion_manager import NotionManager
-from config import TELEGRAM_BOT_TOKEN,TARGET_CHAT_ID
+from app.services.notion_service import NotionManager
+from app.config import TELEGRAM_BOT_TOKEN,TARGET_CHAT_ID
 from telegram import Bot
 
 def escape_markdown(text):

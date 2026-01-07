@@ -5,7 +5,7 @@ import logging
 import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
-from config import (
+from app.config import (
     DEEPSEEK_API_KEY, 
     HAS_TWITTER_CONFIG, 
     CAN_USE_TWITTER_API,
@@ -19,7 +19,7 @@ from config import (
 
 # 引入Twitter API模块（如果配置了Twitter API）
 try:
-    from twitter_api import TwitterAPI, twitter_api
+    from app.services.twitter_service import TwitterAPI, twitter_api
     HAS_TWEEPY = True
 except ImportError:
     HAS_TWEEPY = False
@@ -283,8 +283,11 @@ class ContentProcessor:
                     "original_url": url
                 }
         # 检查是否成功获取内容
-        if not webpage_data.get("content") or len(webpage_data["content"]) < 100:
-            logger.warning(f"获取网页内容不足或为空: {url}")
+        # 对于Twitter/X内容，放宽长度限制，因为推文通常较短
+        min_length = 10 if is_twitter else 100
+        
+        if not webpage_data.get("content") or len(webpage_data["content"]) < min_length:
+            logger.warning(f"获取网页内容不足或为空 (长度: {len(webpage_data.get('content', ''))}, 最小要求: {min_length}): {url}")
             return {
                 "title": webpage_data.get("title", "无法获取标题"),
                 "summary": "无法获取足够的网页内容进行分析。可能是网站访问受限、需要登录，或内容格式特殊。",
