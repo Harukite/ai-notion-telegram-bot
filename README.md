@@ -68,8 +68,8 @@ ai-notion/
 
 1. 克隆此仓库：
 ```bash
-git clone <repository-url>
-cd ai-notion
+git clone https://github.com/Harukite/ai-notion-telegram-bot.git
+cd ai-notion-telegram-bot
 ```
 
 2. 安装依赖：
