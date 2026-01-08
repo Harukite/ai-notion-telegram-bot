@@ -87,9 +87,10 @@ pip install -r requirements.txt
 ```
 # 必需配置
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-NOTION_API_KEY=your_notion_api_key
+NOTION_API_TOKEN=your_notion_api_token
 NOTION_DATABASE_ID=your_notion_database_id
 DEEPSEEK_API_KEY=your_deepseek_api_key
+TARGET_CHAT_ID=your_target_chat_id
 
 # Twitter API配置 (可选)
 # 当网页抓取失败时可使用官方API获取推文
@@ -99,6 +100,13 @@ TWITTER_ACCESS_TOKEN=your_twitter_access_token_here
 TWITTER_ACCESS_SECRET=your_twitter_access_secret_here
 TWITTER_BEARER_TOKEN=your_twitter_bearer_token_here
 USE_TWITTER_API=false  # 设为true启用Twitter API
+
+# Scraper.tech 备用抓取接口 (可选)
+SCRAPER_TECH_ENDPOINT=https://api.scraper.tech/tweet.php
+SCRAPER_TECH_KEY=your_scraper_tech_key
+
+# RapidAPI 备用接口 (可选)
+RAPIDAPI_KEY=your_rapidapi_key
 ```
 
 ## 使用方法
@@ -140,3 +148,14 @@ python3 -m app.main
 - 保持 `.env` 文件的安全，不要将其提交到版本控制系统
 - 由于网站结构各异，某些网页的内容提取效果可能会有差异
 - 更多详情请参考 USER_GUIDE.md 文件
+
+### Notion 数据库字段建议
+
+建议在 Notion 数据库中创建以下字段以保证保存成功：
+
+- 标题：Title
+- 摘要：Rich text
+- 链接：URL
+- 标签：Multi-select
+- 状态：Select（例如：未读/进行中/已完成/已放弃）
+- 添加日期：Date

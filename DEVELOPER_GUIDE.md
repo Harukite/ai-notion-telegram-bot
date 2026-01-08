@@ -8,26 +8,25 @@ AI-Notion Telegram 机器人是一个功能强大的内容管理助手，它可�
 
 ### 主要组件
 
-1. **Bot 核心 (`bot.py`)**
-   - Telegram 机器人接口实现
-   - 命令处理与用户交互
-   - 状态管理与会话控制
+1. **应用入口 (`app/main.py`)**
+   - Telegram 机器人启动与命令注册
+   - 会话控制与消息分发
 
-2. **内容处理器 (`content_processor.py`)**
+2. **内容处理器 (`app/core/content_processor.py`)**
    - 网页内容提取
    - DeepSeek AI 分析与结构化
    - 文本清理和格式化
 
-3. **Notion 管理器 (`notion_manager.py`)**
+3. **Notion 服务 (`app/services/notion_service.py`)**
    - Notion API 交互
    - 数据库条目管理
    - 内容同步与更新
 
-4. **Twitter API 集成 (`twitter_api.py`)**
+4. **Twitter 服务 (`app/services/twitter_service.py`)**
    - Twitter 内容获取
    - API 认证与错误处理
 
-5. **配置管理 (`config.py`)**
+5. **配置管理 (`app/config.py`)**
    - 环境变量处理
    - API 密钥管理
    - 运行时配置
@@ -48,7 +47,7 @@ tweepy==4.12.0
 
 ### 1. Telegram 命令系统
 
-在 `bot.py` 中实现了以下命令处理器:
+在 `app/main.py` 中实现了以下命令处理器:
 
 ```python
 # 命令处理器
@@ -128,7 +127,7 @@ def analyze_with_deepseek(text, url):
 
 ### 4. Notion 数据库交互
 
-`notion_manager.py` 中的核心函数:
+`app/services/notion_service.py` 中的核心函数:
 
 ```python
 def save_to_notion(title, summary, key_points, tags, url):
@@ -148,7 +147,7 @@ def save_to_notion(title, summary, key_points, tags, url):
 
 ### 5. 命令菜单实现
 
-在 `bot.py` 中通过 `post_init` 函数在应用启动时设置命令菜单:
+在 `app/main.py` 中通过 `post_init` 函数在应用启动时设置命令菜单:
 
 ```python
 async def post_init(application: Application) -> None:
@@ -206,16 +205,32 @@ pip install -r requirements.txt
 3. 配置环境变量 (`.env` 文件):
 ```
 TELEGRAM_BOT_TOKEN=your_bot_token
-NOTION_API_KEY=your_notion_key
+NOTION_API_TOKEN=your_notion_token
 NOTION_DATABASE_ID=your_database_id
 DEEPSEEK_API_KEY=your_deepseek_key
+TARGET_CHAT_ID=your_target_chat_id
 # ...其他配置
+```
+
+可选配置:
+
+```
+TWITTER_API_KEY=your_twitter_api_key_here
+TWITTER_API_SECRET=your_twitter_api_secret_here
+TWITTER_ACCESS_TOKEN=your_twitter_access_token_here
+TWITTER_ACCESS_SECRET=your_twitter_access_secret_here
+TWITTER_BEARER_TOKEN=your_twitter_bearer_token_here
+USE_TWITTER_API=false
+
+SCRAPER_TECH_ENDPOINT=https://api.scraper.tech/tweet.php
+SCRAPER_TECH_KEY=your_scraper_tech_key
+RAPIDAPI_KEY=your_rapidapi_key
 ```
 
 ### 运行
 
 ```bash
-python bot.py
+python3 -m app.main
 ```
 
 ### 部署到服务器
@@ -229,7 +244,7 @@ After=network.target
 [Service]
 User=username
 WorkingDirectory=/path/to/ai-notion
-ExecStart=/path/to/ai-notion/venv/bin/python /path/to/ai-notion/bot.py
+ExecStart=/path/to/ai-notion/venv/bin/python -m app.main
 Restart=on-failure
 RestartSec=5s
 
@@ -248,7 +263,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["python", "bot.py"]
+CMD ["python", "-m", "app.main"]
 ```
 
 ## 测试
